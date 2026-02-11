@@ -1,13 +1,15 @@
+import logging
+import os
+from typing import Dict, List
+import whisper
+from django.db import transaction
+from django.http import Http404
 from django.http import JsonResponse
 from django.shortcuts import render
+from openai import OpenAI
 from core.auth import api_login_required
 from team3.models import ExamPack, Exam, ExamSystem, ExamSection, UserExam, UserExamStatus, Feedback
-from django.http import Http404
-from typing import Dict, List
-from django.db import transaction
-import os
-from openai import OpenAI
-import logging
+
 logger = logging.getLogger(__name__)
 
 TEAM_NAME = "team3"
@@ -17,7 +19,7 @@ KEY_SEP = "|||"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 OPENAI_TIMEOUT = int(os.getenv("OPENAI_TIMEOUT", "30"))
-client = OpenAI(base_url="https://openrouter.ai/api/v1",api_key=OPENAI_API_KEY)
+client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=OPENAI_API_KEY)
 
 SYSTEM_MAP = {
     "IELTS": ExamSystem.IELTS,
@@ -40,12 +42,22 @@ SYSTEM_DISPLAY_FA = {
 if not OPENAI_API_KEY:
     raise RuntimeError("OPENAI_API_KEY is not set")
 
+
+_whisper_model = None
+def get_whisper_model():
+    global _whisper_model
+    if _whisper_model is None:
+        _whisper_model = whisper.load_model("tiny")
+    return _whisper_model
+
 @api_login_required
 def ping(request):
     return JsonResponse({"team": TEAM_NAME, "ok": True})
 
+
 def base(request):
     return render(request, f"{TEAM_NAME}/index.html")
+
 
 @api_login_required
 def exam(request):
@@ -89,6 +101,7 @@ def exam(request):
     }
     return render(request, f"{TEAM_NAME}/exam.html", ctx)
 
+
 @api_login_required
 def feedback(request):
     user_exams = (
@@ -103,7 +116,6 @@ def feedback(request):
         )
         .order_by("-created_at")
     )
-
 
     cards_by_pack = {}
 
@@ -159,7 +171,7 @@ def feedback_detail(request):
             exam_id=exam_id,
             is_deleted=False,
             status__in=FINISHED_STATUSES,
-            exam__is_deleted=False,  # NOTE: if your Exam uses deleted_at, change this filter
+            exam__is_deleted=False,
         )
         .order_by("-attempt_no", "-created_at")
         .first()
@@ -178,7 +190,7 @@ def feedback_detail(request):
     )
 
     if not has_feedback:
-        prompt = build_openai_prompt(exam, user_exam.response_text or "")
+        prompt = build_openai_prompt(exam, user_exam)
         generated_text = call_openai_for_feedback(prompt)
         generated_text = normalize_openai_feedback_text(generated_text)
 
@@ -219,21 +231,38 @@ def feedback_detail(request):
 
     return render(request, "team3/feedback_detail.html", context)
 
-
-def build_openai_prompt(exam, user_answer_text: str) -> str:
-    qs = (
+def build_openai_prompt(exam, user_exam: UserExam) -> str:
+    qs = list(
         exam.questions
         .filter(is_deleted=False)
         .order_by("number")
         .values("number", "description")
     )
 
-    q_lines = []
+    question_count = len(qs)
+
+    raw_answer_text = user_exam.response_text or ""
+    answers_map = split_answers_by_question_count(raw_answer_text, question_count)
+    fallback = raw_answer_text.strip()
+
+    qa_lines = []
     for q in qs:
-        q_lines.append(f"Q{q['number']}: {q['description']}")
+        qn = int(q["number"])
+        q_text = q["description"].strip()
+
+        ans = answers_map.get(qn)
+        if ans is None:
+            ans = fallback if fallback else "(no answer)"
+
+        qa_lines.append(
+            f"Q{qn}: {q_text}\n"
+            f"A{qn}: {ans}"
+        )
 
     prompt = f"""
-You are an English exam examiner (IELTS/TOEFL/General).
+You are an English speaking/writing examiner (IELTS/TOEFL/General).
+Evaluate the answers strictly based on what the user actually wrote.
+
 Return feedback for EACH question in EXACT format (one line per question):
 
 Q1{KEY_SEP}<feedback>
@@ -241,25 +270,23 @@ Q2{KEY_SEP}<feedback>
 ...
 
 Rules:
-- One line per question.
-- Do NOT add headings, markdown, bullet-only lines, or extra commentary outside the format.
-- Do NOT repeat the question text or the user's answer.
-- In feedback include: Fluency/Grammar/Vocabulary/Structure + 1 improvement tip.
-- Keep each line concise but useful.
+- One line per question only.
+- Do NOT add headings or extra text.
+- Feedback must match the answer quality. If answer is short/off-topic/empty, say so.
+- Include: Fluency/Grammar/Vocabulary/Structure + 1 improvement tip.
+- Keep each line concise but specific.
 
-QUESTIONS:
-{chr(10).join(q_lines)}
-
-USER ANSWER TEXT (may include all answers in one blob):
-{user_answer_text.strip() if user_answer_text else "(no answer)"}
+Q&A:
+{chr(10).join(qa_lines)}
 """.strip()
 
     return prompt
 
+
 def call_openai_for_feedback(prompt: str) -> str:
     try:
         resp = client.chat.completions.create(
-            model=OPENAI_MODEL,   # e.g. "gpt-4o-mini"
+            model=OPENAI_MODEL,  # e.g. "gpt-4o-mini"
             messages=[
                 {
                     "role": "system",
@@ -282,8 +309,8 @@ def call_openai_for_feedback(prompt: str) -> str:
         logger.exception("OpenAI feedback generation failed")
         return ""
 
-def normalize_openai_feedback_text(text: str) -> str:
 
+def normalize_openai_feedback_text(text: str) -> str:
     if not text:
         return ""
 
@@ -309,7 +336,6 @@ def normalize_openai_feedback_text(text: str) -> str:
     return "\n".join(out_lines).strip()
 
 def parse_feedback_map(description: str) -> Dict[int, str]:
-
     if not description:
         return {}
 
@@ -417,3 +443,67 @@ def build_items(user_exam: UserExam) -> List[dict]:
         )
 
     return items
+
+
+@api_login_required
+def check_voice_file_exists(request):
+    exam_id = request.GET.get("exam_id")
+
+    user_exam = (
+        UserExam.objects
+        .select_related("feedback", "exam", "exam__pack")
+        .filter(
+            user=request.user,
+            exam_id=exam_id,
+            is_deleted=False,
+            status__in=FINISHED_STATUSES,
+            exam__is_deleted=False,
+        )
+        .order_by("-attempt_no", "-created_at")
+        .first()
+    )
+
+    exists, abs_path, reason = voice_file_exists_for_user_exam(user_exam)
+    transcript = ""
+    if exists:
+        transcript = transcribe_audio_file(abs_path)
+
+    logger.info(
+        "VOICE CHECK | user=%s exam_id=%s user_exam_id=%s exists=%s reason=%s path=%s",
+        request.user.id, exam_id, user_exam.id, exists, reason, abs_path
+    )
+
+    return JsonResponse({
+        "ok": True,
+        "exam_id": int(exam_id),
+        "user_exam_id": user_exam.id,
+        "exists": exists,
+        "reason": reason,
+        "rel_path": user_exam.response_voice_path or "",
+        "abs_path": abs_path,
+        "transcript": transcript,   # ✨ NEW FIELD
+    })
+
+def voice_file_exists_for_user_exam(user_exam):
+    rel_path = (user_exam.response_voice_path or "").strip()
+    if not rel_path:
+        return False, "", "empty_response_voice_path"
+
+    root = "/app/team3/static/team3/public/"
+    abs_path = os.path.join(root, rel_path)
+    last_checked = abs_path
+    if os.path.isfile(abs_path):
+        return True, abs_path, "found"
+
+    return False, last_checked, "not_found"
+
+def transcribe_audio_file(audio_path: str) -> str:
+    if not os.path.isfile(audio_path):
+        return ""
+    model = get_whisper_model()
+    try:
+        result = model.transcribe(audio_path, language="en", fp16=False)
+        return result["text"].strip()
+    except Exception as e:
+        logger.error(f"Whisper transcription failed for {audio_path}: {e}")
+        return ""

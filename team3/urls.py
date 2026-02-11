@@ -6,5 +6,6 @@ urlpatterns = [
     path("ping/", views.ping),
     path("exams/", views.exam),
     path("feedbacks/", views.feedback),
-    path("feedback-detail", views.feedback_detail),
+    path("feedback-detail/", views.feedback_detail),
+    path("check/", views.check_voice_file_exists),
 ]
