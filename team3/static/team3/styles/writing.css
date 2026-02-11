@@ -1,0 +1,141 @@
+* {
+    box-sizing: border-box;
+    font-family: serif;
+}
+
+html, body {
+    margin: 0;
+    padding: 0;
+    background: rgba(244, 240, 240, 0.89);
+}
+
+.exam-wrapper {
+    padding: 24px;
+    max-width: 1100px;
+    margin: auto;
+}
+
+.exam-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background-color: white;
+    border-radius: 30px;
+    padding: 14px 18px;
+}
+
+.user-info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.avatar {
+    width: 36px;
+    height: 36px;
+    background: #ccc;
+    border-radius: 50%;
+}
+
+.timer {
+    margin-left: 8px;
+    color: #555;
+}
+
+.exam-title {
+    text-align: center;
+}
+
+.exam-title .subtitle {
+    font-size: 14px;
+    color: #666;
+}
+
+.exam-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.btn-outline {
+    background: #fff;
+    border: 1px solid #ccc;
+    padding: 6px 14px;
+    border-radius: 20px;
+    cursor: pointer;
+}
+
+.btn-primary {
+    background: #dbe6ff;
+    border: none;
+    padding: 6px 18px;
+    border-radius: 20px;
+    cursor: pointer;
+}
+
+.question-card {
+    border-radius: 28px;
+    padding: 24px;
+    margin-bottom: 24px;
+}
+
+.question-card h3 {
+    text-align: center;
+    margin-bottom: 6px;
+}
+
+.question-text {
+    text-align: center;
+    margin-bottom: 18px;
+    font-weight: 500;
+}
+
+.answer-box {
+    background: rgba(255, 255, 255, 0.7);
+    border-radius: 20px;
+    padding: 20px;
+    min-height: 120px;
+
+    font-size: 16px;
+    line-height: 1.6;
+
+    border: none;
+    outline: none;
+    resize: none;
+
+    width: 100%;
+}
+
+.answer-box:focus {
+    box-shadow: 0 0 0 2px rgba(58, 91, 160, 0.4);
+}
+
+.finish-wrapper {
+    display: flex;
+    justify-content: center;
+    margin-top: 30px;
+}
+
+.finish-btn {
+    background: #B0CAFF;
+    border: none;
+    padding: 16px 80px;
+    font-size: 26px;
+    border-radius: 30px;
+    cursor: pointer;
+}
+
+.question-card:nth-child(odd) {
+    background-color: #B0CAFF;
+}
+
+.question-card:nth-child(even) {
+    background-color: rgba(58, 91, 160, 0.7);
+}
+
+.question-card:nth-child(odd) textarea {
+    background-color: #DDE8FE;
+}
+
+.question-card:nth-child(even) textarea {
+    background-color: #B0CAFF;
+}

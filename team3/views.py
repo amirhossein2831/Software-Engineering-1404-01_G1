@@ -504,3 +504,7 @@ def transcribe_audio_file(audio_path: str) -> str:
 @api_login_required
 def speaking(request):
     return render(request, "team3/speaking.html")
+
+@api_login_required
+def writing(request):
+    return render(request, "team3/writing.html")

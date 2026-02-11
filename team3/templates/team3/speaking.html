@@ -2,8 +2,9 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>Writing Exam</title>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Speaking Exam</title>
     <link rel="stylesheet" href="{% static 'team3/styles/speaking.css' %}">
 </head>
 <body>
@@ -20,7 +21,7 @@
 
         <div class="exam-title">
             <div>exam number 1</div>
-            <div class="subtitle">writing</div>
+            <div class="subtitle">speaking</div>
         </div>
 
         <div class="exam-actions">
@@ -29,28 +30,58 @@
         </div>
     </div>
 
-    <div style="background-color: white;border-radius: 40px;padding: 30px 20px;margin-top: 20px">
-        <!-- Question Card (Light) -->
-        <div class="question-card" >
-            <h3>Question 1</h3>
-            <p class="question-text">how are you today?</p>
+    <div class="exam-body" style="background-color: white;border-radius: 40px;padding: 30px 20px;margin-top: 20px">
 
-            <textarea class="answer-box" placeholder="Type your answer here..."></textarea>
-        </div>
-
+        <!-- Question cards -->
         <div class="question-card">
             <h3>Question 1</h3>
             <p class="question-text">how are you today?</p>
 
-            <textarea class="answer-box" placeholder="Type your answer here..."></textarea>
+            <div class="voice-actions">
+                <button class="voice-btn" type="button">record voice</button>
+
+                <!-- Upload: button + hidden input -->
+                <button class="voice-btn" type="button" onclick="document.getElementById('upload-q1').click()">
+                    upload voice
+                </button>
+                <input id="upload-q1" class="voice-input" type="file" accept="audio/*" />
+            </div>
+        </div>
+
+        <div class="question-card">
+            <h3>Question 2</h3>
+            <p class="question-text">tell me about your daily routine</p>
+
+            <div class="voice-actions">
+                <button class="voice-btn" type="button">record voice</button>
+
+                <button class="voice-btn" type="button" onclick="document.getElementById('upload-q2').click()">
+                    upload voice
+                </button>
+                <input id="upload-q2" class="voice-input" type="file" accept="audio/*" />
+            </div>
+        </div>
+
+        <div class="question-card">
+            <h3>Question 3</h3>
+            <p class="question-text">do you prefer city life or countryside?</p>
+
+            <div class="voice-actions">
+                <button class="voice-btn" type="button">record voice</button>
+
+                <button class="voice-btn" type="button" onclick="document.getElementById('upload-q3').click()">
+                    upload voice
+                </button>
+                <input id="upload-q3" class="voice-input" type="file" accept="audio/*" />
+            </div>
         </div>
 
         <!-- Finish Button -->
         <div class="finish-wrapper">
             <button class="finish-btn">Finish</button>
         </div>
-    </div>
 
+    </div>
 
 </div>
 

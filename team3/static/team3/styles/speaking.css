@@ -1,139 +1,154 @@
-* {
-    box-sizing: border-box;
-    font-family: serif;
-}
-
 html, body {
     margin: 0;
     padding: 0;
-    background: rgba(236, 236, 236, 0.89);
+    background: rgba(244, 240, 240, 0.89);
 }
 
 .exam-wrapper {
-    padding: 24px;
-    max-width: 1100px;
-    margin: auto;
+    width: 900px;
+    margin: 30px auto;
 }
 
+/* Header */
 .exam-header {
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    margin-bottom: 30px;
+    justify-content: space-between;
+    background-color: white;
+    border-radius: 30px;
+    padding: 14px 18px;
 }
 
 .user-info {
     display: flex;
     align-items: center;
     gap: 10px;
+    background: #ffffff;
+    border-radius: 999px;
+    padding: 8px 12px;
 }
 
 .avatar {
-    width: 36px;
-    height: 36px;
-    background: #ccc;
+    width: 34px;
+    height: 34px;
     border-radius: 50%;
+    background: #dbe7ff;
+    border: 2px solid #b0caff;
 }
 
-.timer {
-    margin-left: 8px;
-    color: #555;
-}
+.username { font-size: 16px; }
+.timer { font-size: 16px; margin-left: 8px; }
 
 .exam-title {
     text-align: center;
+    line-height: 1.1;
+    font-size: 18px;
 }
 
-.exam-title .subtitle {
-    font-size: 14px;
-    color: #666;
+.subtitle {
+    font-size: 16px;
 }
 
 .exam-actions {
     display: flex;
-    gap: 10px;
+    gap: 12px;
 }
 
 .btn-outline {
-    background: #fff;
-    border: 1px solid #ccc;
-    padding: 6px 14px;
-    border-radius: 20px;
+    border: none;
+    background: #ffffff;
+    padding: 10px 18px;
+    border-radius: 999px;
     cursor: pointer;
 }
 
 .btn-primary {
-    background: #dbe6ff;
     border: none;
-    padding: 6px 18px;
-    border-radius: 20px;
+    background: #d7e6ff;
+    padding: 10px 22px;
+    border-radius: 999px;
     cursor: pointer;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.12);
 }
 
+/* Cards */
 .question-card {
     border-radius: 28px;
-    padding: 24px;
-    margin-bottom: 24px;
+    padding: 18px 16px;
+    margin-top: 18px;
+    text-align: center;
 }
 
+/* Odd = light blue (B0CAFF 100%) */
+.question-card:nth-child(odd) {
+    background: #B0CAFF;
+}
+
+/* Even = dark blue (3A5BA0 70%) */
+.question-card:nth-child(even) {
+    background: rgba(58, 91, 160, 0.70);
+}
+
+/* Headings */
 .question-card h3 {
-    text-align: center;
-    margin-bottom: 6px;
+    margin: 0;
+    font-size: 14px;
+    font-weight: 700;
 }
 
 .question-text {
-    text-align: center;
-    margin-bottom: 18px;
-    font-weight: 500;
+    margin: 6px 0 18px 0;
+    font-size: 14px;
 }
 
-.answer-box {
-    background: rgba(255, 255, 255, 0.7);
-    border-radius: 20px;
-    padding: 20px;
-    min-height: 120px;
+/* Buttons row */
+.voice-actions {
+    display: flex;
+    justify-content: space-between;
+    gap: 30px;
+    padding: 0 40px;
+}
 
-    font-size: 16px;
-    line-height: 1.6;
-
+/* Pill button */
+.voice-btn {
+    width: 48%;
     border: none;
-    outline: none;
-    resize: none;
-
-    width: 100%;
+    border-radius: 999px;
+    padding: 14px 12px;
+    cursor: pointer;
+    font-size: 18px;
+    box-shadow: 0 6px 14px rgba(0,0,0,0.15);
 }
 
-.answer-box:focus {
-    box-shadow: 0 0 0 2px rgba(58, 91, 160, 0.4);
+/* Button color depends on odd/even card */
+.question-card:nth-child(odd) .voice-btn {
+    background: #DDE8FE; /* odd inner = DDE8FE 100% */
 }
 
+.question-card:nth-child(even) .voice-btn {
+    background: #B0CAFF; /* even inner = B0CAFF 100% */
+}
+
+/* Hidden file input */
+.voice-input {
+    display: none;
+}
+
+/* Finish */
 .finish-wrapper {
     display: flex;
     justify-content: center;
-    margin-top: 30px;
+    margin-top: 26px;
 }
 
 .finish-btn {
-    background: #B0CAFF;
+    width: 420px;
     border: none;
-    padding: 16px 80px;
-    font-size: 26px;
-    border-radius: 30px;
+    border-radius: 24px;
+    padding: 18px 0;
+    font-size: 34px;
+    font-weight: 700;
+    background: rgba(176, 202, 255, 0.85);
     cursor: pointer;
-}
-
-.question-card:nth-child(odd) {
-    background-color: #B0CAFF;
-}
-
-.question-card:nth-child(even) {
-    background-color: rgba(58, 91, 160, 0.7);
-}
-
-.question-card:nth-child(odd) textarea {
-    background-color: #DDE8FE;
-}
-
-.question-card:nth-child(even) textarea {
-    background-color: #B0CAFF;
+    box-shadow: 0 8px 16px rgba(0,0,0,0.18);
 }
