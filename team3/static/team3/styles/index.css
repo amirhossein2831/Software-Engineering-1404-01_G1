@@ -812,3 +812,45 @@ body {
     background-color: var(--light-blue);
     margin: 16px 0 20px 0;
 }
+
+.feedback-grid,
+.feedback-grid * {
+    direction: ltr;
+    text-align: left;
+}
+
+.feedback-grid {
+    display: grid;
+    gap: 25px;
+}
+
+.feedback-grid > div {
+    padding: 16px 18px;
+    border-radius: 30px;
+}
+
+/* 2) odd/even card background */
+.feedback-grid > div:nth-child(odd) {
+    background: rgba(176, 202, 255, 0.96);
+}
+
+.feedback-grid > div:nth-child(even) {
+    background: rgba(58, 91, 160, 0.76);
+    color: #fff;
+}
+
+.feedback-grid > div > div {
+    margin-top: 12px;
+    padding: 12px 14px;
+    border-radius: 14px;
+}
+
+.feedback-grid > div:nth-child(odd) > div {
+    background: rgba(58, 91, 160, 0.76);
+    color: #fff;
+}
+
+.feedback-grid > div:nth-child(even) > div {
+    background: rgba(176, 202, 255, 0.96);
+    color: #111;
+}
