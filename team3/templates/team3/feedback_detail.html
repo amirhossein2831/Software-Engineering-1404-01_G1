@@ -64,24 +64,6 @@
                 </div>
             </div>
         </section>
-        {% if debug %}
-        <div class="test-card test-card--full" style="direction:ltr;text-align:left;grid-column:1/-1;">
-            <h3 class="test-title">DEBUG</h3>
-            <pre style="white-space:pre-wrap;word-break:break-word;margin:0;">
-exam_id: {{ debug.exam_id }}
-user_id: {{ debug.user_id }}
-user_exam_id: {{ debug.user_exam_id }}
-attempt_no: {{ debug.attempt_no }}
-status: {{ debug.status }}
-has_feedback: {{ debug.has_feedback }}
-feedback_id: {{ debug.feedback_id }}
-feedback_deleted: {{ debug.feedback_deleted }}
-feedback_desc_len: {{ debug.feedback_desc_len }}
-response_len: {{ debug.response_len }}
-items_len: {{ debug.items_len }}
-  </pre>
-        </div>
-        {% endif %}
 
         <section class="tests-section">
             <div class="feedback-grid" style="padding:0 20px;">
