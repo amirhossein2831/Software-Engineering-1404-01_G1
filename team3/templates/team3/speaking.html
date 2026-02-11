@@ -1,0 +1,60 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Writing Exam</title>
+    <link rel="stylesheet" href="{% static 'team3/styles/speaking.css' %}">
+</head>
+<body>
+
+<div class="exam-wrapper">
+
+    <!-- Header -->
+    <div class="exam-header">
+        <div class="user-info">
+            <div class="avatar"></div>
+            <span class="username">name</span>
+            <span class="timer">59:02</span>
+        </div>
+
+        <div class="exam-title">
+            <div>exam number 1</div>
+            <div class="subtitle">writing</div>
+        </div>
+
+        <div class="exam-actions">
+            <button class="btn-outline">توقف / ادامه</button>
+            <button class="btn-primary">خروج</button>
+        </div>
+    </div>
+
+    <!-- Question Card (Light) -->
+    <div class="question-card light">
+        <h3>Question 1</h3>
+        <p class="question-text">how are you today?</p>
+
+        <div class="answer-box">
+            so today i am ...
+        </div>
+    </div>
+
+    <!-- Question Card (Dark) -->
+    <div class="question-card dark">
+        <h3>Question 1</h3>
+        <p class="question-text">how are you today?</p>
+
+        <div class="answer-box">
+            so today i am ...
+        </div>
+    </div>
+
+    <!-- Finish Button -->
+    <div class="finish-wrapper">
+        <button class="finish-btn">Finish</button>
+    </div>
+
+</div>
+
+</body>
+</html>

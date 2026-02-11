@@ -230,7 +230,6 @@ def feedback_detail(request):
     }
 
     return render(request, "team3/feedback_detail.html", context)
-
 def build_openai_prompt(exam, user_exam: UserExam) -> str:
     qs = list(
         exam.questions
@@ -254,27 +253,24 @@ def build_openai_prompt(exam, user_exam: UserExam) -> str:
         if ans is None:
             ans = fallback if fallback else "(no answer)"
 
-        qa_lines.append(
-            f"Q{qn}: {q_text}\n"
-            f"A{qn}: {ans}"
-        )
+        qa_lines.append(f"Q{qn}: {q_text}\nA{qn}: {ans}")
 
     prompt = f"""
 You are an English speaking/writing examiner (IELTS/TOEFL/General).
-Evaluate the answers strictly based on what the user actually wrote.
+Evaluate answers strictly based on what the user wrote.
 
-Return feedback for EACH question in EXACT format (one line per question):
+Return feedback for EACH question in EXACT format (ONE LINE per question):
 
-Q1{KEY_SEP}<feedback>
-Q2{KEY_SEP}<feedback>
-...
+Q1{KEY_SEP}Fluency: ... | Grammar: ... | Vocabulary: ... | Structure: ... | Tip: ...
+Q2{KEY_SEP}Fluency: ... | Grammar: ... | Vocabulary: ... | Structure: ... | Tip: ...
 
 Rules:
-- One line per question only.
-- Do NOT add headings or extra text.
-- Feedback must match the answer quality. If answer is short/off-topic/empty, say so.
-- Include: Fluency/Grammar/Vocabulary/Structure + 1 improvement tip.
-- Keep each line concise but specific.
+- ONE line per question only.
+- Do NOT add headings, markdown, or extra lines.
+- Even if the answer is OFF-TOPIC/EMPTY, still fill ALL 5 parts.
+- If OFF-TOPIC: say "Off-topic" in Structure and Tip must tell how to answer the actual prompt.
+- Minimum length per feedback line: ~35 words (to avoid too short answers).
+- Be specific to the question and the given answer.
 
 Q&A:
 {chr(10).join(qa_lines)}
@@ -282,33 +278,30 @@ Q&A:
 
     return prompt
 
-
 def call_openai_for_feedback(prompt: str) -> str:
     try:
         resp = client.chat.completions.create(
-            model=OPENAI_MODEL,  # e.g. "gpt-4o-mini"
+            model=OPENAI_MODEL,
             messages=[
                 {
                     "role": "system",
                     "content": (
-                        "You are an IELTS examiner. "
-                        "Return feedback EXACTLY in this format:\n"
-                        "Q1|||...\nQ2|||...\n\n"
-                        "No extra text."
+                        "You are a strict exam examiner. "
+                        "Return ONE LINE per question in this exact format:\n"
+                        "Q1|||Fluency: ... | Grammar: ... | Vocabulary: ... | Structure: ... | Tip: ...\n"
+                        "Q2|||Fluency: ... | Grammar: ... | Vocabulary: ... | Structure: ... | Tip: ...\n"
+                        "No headings. No extra lines."
                     ),
                 },
                 {"role": "user", "content": prompt},
             ],
             temperature=0.3,
-            max_tokens=900,
+            max_tokens=1200,  # give room for richer lines
         )
-
         return (resp.choices[0].message.content or "").strip()
-
     except Exception:
         logger.exception("OpenAI feedback generation failed")
         return ""
-
 
 def normalize_openai_feedback_text(text: str) -> str:
     if not text:
