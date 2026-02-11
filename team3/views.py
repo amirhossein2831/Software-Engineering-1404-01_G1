@@ -500,3 +500,7 @@ def transcribe_audio_file(audio_path: str) -> str:
     except Exception as e:
         logger.error(f"Whisper transcription failed for {audio_path}: {e}")
         return ""
+
+@api_login_required
+def speaking(request):
+    return render(request, "team3/speaking.html")

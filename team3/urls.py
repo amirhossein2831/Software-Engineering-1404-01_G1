@@ -8,4 +8,5 @@ urlpatterns = [
     path("feedbacks/", views.feedback),
     path("feedback-detail/", views.feedback_detail),
     path("check/", views.check_voice_file_exists),
+    path("speaking/", views.speaking)
 ]

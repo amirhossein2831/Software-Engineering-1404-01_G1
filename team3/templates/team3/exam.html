@@ -65,8 +65,8 @@
                 {% for p in packs %}
                 <div class="test-card">
                     <h3 class="test-title">{{ p.title }}</h3>
-                    <button class="test-btn" onclick="location.href='/team3/start-exam?exam_id={{ p.sections.speaking }}'">Speaking</button>
-                    <button class="test-btn" onclick="location.href='/team3/start-exam?exam_id={{ p.sections.writing }}'">Writing</button>
+                    <button class="test-btn" onclick="location.href='/team3/speaking?exam_id={{ p.sections.speaking }}'">Speaking</button>
+                    <button class="test-btn" onclick="location.href='/team3/writing?exam_id={{ p.sections.writing }}'">Writing</button>
                     <button class="test-btn" disabled>Reading</button>
                     <button class="test-btn" disabled>Listening</button>
                 </div>
