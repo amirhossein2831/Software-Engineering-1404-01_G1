@@ -5,6 +5,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
     <title>Speaking Exam</title>
+    <link rel="stylesheet" href="{% static 'team3/styles/index.css' %}">
     <link rel="stylesheet" href="{% static 'team3/styles/speaking.css' %}">
 </head>
 <body>
@@ -14,7 +15,13 @@
     <!-- Header -->
     <div class="exam-header">
         <div class="user-info">
-            <div class="avatar"></div>
+            <div class="user-avatar" aria-hidden="true">
+                <svg width="30" height="30" viewBox="0 0 30 30" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="15" cy="10" r="5" fill="#647eb4"/>
+                    <path d="M5 25C5 20 9 17 15 17C21 17 25 20 25 25" stroke="#647eb4" stroke-width="2"
+                          fill="none"/>
+                </svg>
+            </div>
             <span class="username">name</span>
             <span class="timer">59:02</span>
         </div>

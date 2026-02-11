@@ -28,28 +28,37 @@ html, body {
     display: flex;
     align-items: center;
     gap: 10px;
+    background: #ffffff;
+    border-radius: 999px;
+    padding: 8px 12px;
 }
 
+
 .avatar {
-    width: 36px;
-    height: 36px;
-    background: #ccc;
+    width: 34px;
+    height: 34px;
     border-radius: 50%;
+    background: #dbe7ff;
+    border: 2px solid #b0caff;
 }
+
+.username { font-size: 16px; }
 
 .timer {
     margin-left: 8px;
     color: #555;
 }
 
-.exam-title {
-    text-align: center;
+.subtitle {
+    font-size: 16px;
 }
 
-.exam-title .subtitle {
-    font-size: 14px;
-    color: #666;
+.exam-title {
+    text-align: center;
+    line-height: 1.1;
+    font-size: 18px;
 }
+
 
 .exam-actions {
     display: flex;
