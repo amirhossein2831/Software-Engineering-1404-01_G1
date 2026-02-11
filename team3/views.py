@@ -1,13 +1,23 @@
 from django.http import JsonResponse
 from django.shortcuts import render
 from core.auth import api_login_required
-from team3.models import ExamPack, Exam, ExamSystem, ExamSection, UserExam, UserExamStatus
+from team3.models import ExamPack, Exam, ExamSystem, ExamSection, UserExam, UserExamStatus, Feedback
 from django.http import Http404
 from typing import Dict, List
+from django.db import transaction
+import os
+from openai import OpenAI
+import logging
+logger = logging.getLogger(__name__)
 
 TEAM_NAME = "team3"
 
 KEY_SEP = "|||"
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+OPENAI_TIMEOUT = int(os.getenv("OPENAI_TIMEOUT", "30"))
+client = OpenAI(base_url="https://openrouter.ai/api/v1",api_key=OPENAI_API_KEY)
 
 SYSTEM_MAP = {
     "IELTS": ExamSystem.IELTS,
@@ -26,6 +36,9 @@ SYSTEM_DISPLAY_FA = {
     ExamSystem.TOEFL: "تافل",
     ExamSystem.GENERAL: "جنرال",
 }
+
+if not OPENAI_API_KEY:
+    raise RuntimeError("OPENAI_API_KEY is not set")
 
 @api_login_required
 def ping(request):
@@ -78,7 +91,6 @@ def exam(request):
 
 @api_login_required
 def feedback(request):
-    # 1) all finished user_exams for this user
     user_exams = (
         UserExam.objects
         .select_related("exam", "exam__pack")
@@ -140,25 +152,50 @@ def feedback_detail(request):
         raise Http404("exam_id is required")
 
     user_exam = (
-        UserExam.objects.select_related("feedback", "exam", "exam__pack")
+        UserExam.objects
+        .select_related("feedback", "exam", "exam__pack")
         .filter(
             user=request.user,
             exam_id=exam_id,
             is_deleted=False,
             status__in=FINISHED_STATUSES,
-            exam__is_deleted=False,
+            exam__is_deleted=False,  # NOTE: if your Exam uses deleted_at, change this filter
         )
         .order_by("-attempt_no", "-created_at")
         .first()
     )
+
     if not user_exam:
         raise Http404("No finished attempt found for this exam")
 
     exam = user_exam.exam
-    has_feedback = bool(user_exam.feedback_id and user_exam.feedback and not user_exam.feedback.is_deleted)
+
+    has_feedback = (
+            bool(user_exam.feedback_id)
+            and user_exam.feedback is not None
+            and (not user_exam.feedback.is_deleted)
+            and bool((user_exam.feedback.description or "").strip())
+    )
+
+    if not has_feedback:
+        prompt = build_openai_prompt(exam, user_exam.response_text or "")
+        generated_text = call_openai_for_feedback(prompt)
+        generated_text = normalize_openai_feedback_text(generated_text)
+
+        if generated_text:
+            with transaction.atomic():
+                fb = Feedback.objects.create(description=generated_text)
+                user_exam.feedback = fb
+                user_exam.save(update_fields=["feedback"])
+
+            user_exam = (
+                UserExam.objects
+                .select_related("feedback", "exam", "exam__pack")
+                .get(pk=user_exam.pk)
+            )
+            has_feedback = True
 
     items = build_items(user_exam)
-
     context = {
         "user_exam": user_exam,
         "exam": exam,
@@ -166,25 +203,124 @@ def feedback_detail(request):
         "section": exam.section,
         "has_feedback": has_feedback,
         "items": items,
+
+        "debug": {
+            "exam_id": str(exam_id),
+            "user_exam_id": user_exam.id,
+            "attempt_no": user_exam.attempt_no,
+            "status": user_exam.status,
+            "has_feedback": has_feedback,
+            "feedback_id": user_exam.feedback_id,
+            "feedback_desc_len": len((user_exam.feedback.description or "") if user_exam.feedback else ""),
+            "response_len": len(user_exam.response_text or ""),
+            "items_len": len(items),
+        }
     }
+
     return render(request, "team3/feedback_detail.html", context)
 
 
-# ---------- Helpers ----------
+def build_openai_prompt(exam, user_answer_text: str) -> str:
+    qs = (
+        exam.questions
+        .filter(is_deleted=False)
+        .order_by("number")
+        .values("number", "description")
+    )
+
+    q_lines = []
+    for q in qs:
+        q_lines.append(f"Q{q['number']}: {q['description']}")
+
+    prompt = f"""
+You are an English exam examiner (IELTS/TOEFL/General).
+Return feedback for EACH question in EXACT format (one line per question):
+
+Q1{KEY_SEP}<feedback>
+Q2{KEY_SEP}<feedback>
+...
+
+Rules:
+- One line per question.
+- Do NOT add headings, markdown, bullet-only lines, or extra commentary outside the format.
+- Do NOT repeat the question text or the user's answer.
+- In feedback include: Fluency/Grammar/Vocabulary/Structure + 1 improvement tip.
+- Keep each line concise but useful.
+
+QUESTIONS:
+{chr(10).join(q_lines)}
+
+USER ANSWER TEXT (may include all answers in one blob):
+{user_answer_text.strip() if user_answer_text else "(no answer)"}
+""".strip()
+
+    return prompt
+
+def call_openai_for_feedback(prompt: str) -> str:
+    try:
+        resp = client.chat.completions.create(
+            model=OPENAI_MODEL,   # e.g. "gpt-4o-mini"
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are an IELTS examiner. "
+                        "Return feedback EXACTLY in this format:\n"
+                        "Q1|||...\nQ2|||...\n\n"
+                        "No extra text."
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.3,
+            max_tokens=900,
+        )
+
+        return (resp.choices[0].message.content or "").strip()
+
+    except Exception:
+        logger.exception("OpenAI feedback generation failed")
+        return ""
+
+def normalize_openai_feedback_text(text: str) -> str:
+
+    if not text:
+        return ""
+
+    out_lines: List[str] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        up = line.upper()
+        if not up.startswith("Q"):
+            continue
+        if KEY_SEP not in line:
+            continue
+        left, right = line.split(KEY_SEP, 1)
+        left = left.strip().upper()  # Q1
+        right = right.strip()
+        if not left[1:].isdigit():
+            continue
+        if not right:
+            continue
+        out_lines.append(f"{left}{KEY_SEP}{right}")
+
+    return "\n".join(out_lines).strip()
+
 def parse_feedback_map(description: str) -> Dict[int, str]:
 
     if not description:
         return {}
 
     result: Dict[int, str] = {}
-
     for line in description.splitlines():
         line = line.strip()
         if not line or KEY_SEP not in line:
             continue
 
         left, fb = line.split(KEY_SEP, 1)
-        left = left.strip().upper()   # Q1
+        left = left.strip().upper()  # Q1
         fb = fb.strip()
 
         if not left.startswith("Q"):
@@ -201,15 +337,16 @@ def parse_feedback_map(description: str) -> Dict[int, str]:
 
 
 def split_answers_by_question_count(raw: str, question_count: int) -> Dict[int, str]:
-
     raw = (raw or "").strip()
     if not raw:
         return {}
 
-    # If user already uses "Q1|||..." format, parse it
-    has_structured = any(line.strip().upper().startswith("Q") and KEY_SEP in line for line in raw.splitlines())
+    has_structured = any(
+        line.strip().upper().startswith("Q") and KEY_SEP in line and line.strip().upper()[1:2].isdigit()
+        for line in raw.splitlines()
+    )
     if not has_structured:
-        return {}  # means "no structured answers"
+        return {}
 
     ans_map: Dict[int, str] = {}
     for line in raw.splitlines():
@@ -235,25 +372,28 @@ def split_answers_by_question_count(raw: str, question_count: int) -> Dict[int, 
 
 
 def build_items(user_exam: UserExam) -> List[dict]:
-
     exam = user_exam.exam
 
-    # questions from DB
     qs = list(
-        exam.questions.filter(is_deleted=False).order_by("number").values("number", "description")
+        exam.questions
+        .filter(is_deleted=False)
+        .order_by("number")
+        .values("number", "description")
     )
     question_count = len(qs)
 
-    # feedback map
     feedback_map: Dict[int, str] = {}
-    if user_exam.feedback_id and user_exam.feedback and not user_exam.feedback.is_deleted:
+    if (
+            user_exam.feedback_id
+            and user_exam.feedback
+            and not user_exam.feedback.is_deleted
+            and (user_exam.feedback.description or "").strip()
+    ):
         feedback_map = parse_feedback_map(user_exam.feedback.description)
 
-    # answers map (optional structured)
     raw_answer_text = user_exam.response_text or ""
     answers_map = split_answers_by_question_count(raw_answer_text, question_count)
 
-    # fallback answer if not structured:
     fallback_answer = raw_answer_text.strip()
 
     items: List[dict] = []
@@ -277,4 +417,3 @@ def build_items(user_exam: UserExam) -> List[dict]:
         )
 
     return items
-

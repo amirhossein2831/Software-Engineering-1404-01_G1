@@ -18,6 +18,7 @@ services:
       dockerfile: team3/Dockerfile
     environment:
       - TEAM_NAME=team3
+      - OPENAI_API_KEY=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
     networks: [app404]
     command: >
       sh -c "
