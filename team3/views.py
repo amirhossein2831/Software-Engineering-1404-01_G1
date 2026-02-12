@@ -198,6 +198,9 @@ def feedback_detail(request):
     is_processing_speaking = (
             is_speaking and not (user_exam.response_text or "").strip()
     )
+    raw_answer_text = (user_exam.response_text or "").strip()
+    has_real_answer = has_any_non_empty_answer(raw_answer_text)
+    is_empty_submission = ( raw_answer_text and not has_real_answer)
 
     has_feedback = (
             bool(user_exam.feedback_id)
@@ -206,7 +209,7 @@ def feedback_detail(request):
             and bool((user_exam.feedback.description or "").strip())
     )
 
-    if not has_feedback and not is_processing_speaking:
+    if not has_feedback and not is_processing_speaking and not is_empty_submission:
         prompt = build_openai_prompt(exam, user_exam)
         generated_text = call_openai_for_feedback(prompt)
         generated_text = normalize_openai_feedback_text(generated_text)
@@ -233,6 +236,7 @@ def feedback_detail(request):
         "has_feedback": has_feedback,
         "items": items,
         "is_processing_speaking": is_processing_speaking,
+        "is_empty_submission": is_empty_submission,
     }
 
     return render(request, "team3/feedback_detail.html", context)
@@ -441,6 +445,23 @@ def build_items(user_exam: UserExam) -> List[dict]:
         )
 
     return items
+
+def has_any_non_empty_answer(raw: str) -> bool:
+    if not raw:
+        return False
+
+    for line in raw.splitlines():
+        if KEY_SEP not in line:
+            continue
+
+        left, ans = line.split(KEY_SEP, 1)
+        left = left.strip().upper()
+        ans = ans.strip()
+
+        if left.startswith("Q") and left[1:].isdigit() and ans:
+            return True
+
+    return False
 
 def _calc_remaining_seconds(user_exam: UserExam) -> int:
     if user_exam.remaining_seconds is None:
