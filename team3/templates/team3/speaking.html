@@ -55,14 +55,13 @@
                        accept="audio/*"
                        data-qnum="{{ q.number }}"
                        style="display:none" />
-
-                <div class="upload-status" id="status-q{{ q.number }}" style="margin-top:8px;font-size:13px;">
-                    {% if voice_map|get_item:q.number %}
-                    Uploaded: {{ voice_map|get_item:q.number }}
-                    {% else %}
-                    No file uploaded
-                    {% endif %}
-                </div>
+            </div>
+            <div class="upload-status" id="status-q{{ q.number }}" style="margin-top:15px;font-size:15px;">
+                {% if voice_map|get_item:q.number %}
+                Uploaded: {{ voice_map|get_item:q.number }}
+                {% else %}
+                No file uploaded
+                {% endif %}
             </div>
         </div>
         {% endfor %}
