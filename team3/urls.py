@@ -7,7 +7,7 @@ urlpatterns = [
     path("exams/", views.exam, name="exam"),
     path("feedbacks/", views.feedback, name="feedbacks"),
     path("feedback-detail/", views.feedback_detail),
-    # path("check/", views.check_voice_file_exists),
+
     path("speaking/<int:exam_id>/", views.speaking_exam, name="speaking_exam"),
     path("speaking/<int:user_exam_id>/pause/", views.speaking_pause, name="speaking_pause"),
     path("speaking/<int:user_exam_id>/resume/", views.speaking_resume, name="speaking_resume"),

@@ -1,11 +1,12 @@
 import logging
 import os
 import re
+import threading
 import uuid
 from typing import Dict, List
 import json
 
-# import whisper
+import whisper
 from django.urls import reverse
 from django.utils import timezone
 from django.db import transaction
@@ -54,13 +55,13 @@ SYSTEM_DISPLAY_FA = {
 if not OPENAI_API_KEY:
     raise RuntimeError("OPENAI_API_KEY is not set")
 
-#
-# _whisper_model = None
-# def get_whisper_model():
-#     global _whisper_model
-#     if _whisper_model is None:
-#         _whisper_model = whisper.load_model("tiny")
-#     return _whisper_model
+
+_whisper_model = None
+def get_whisper_model():
+    global _whisper_model
+    if _whisper_model is None:
+        _whisper_model = whisper.load_model("tiny")
+    return _whisper_model
 
 @api_login_required
 def ping(request):
@@ -450,74 +451,6 @@ def build_items(user_exam: UserExam) -> List[dict]:
 
     return items
 
-#
-# @api_login_required
-# def check_voice_file_exists(request):
-#     exam_id = request.GET.get("exam_id")
-#
-#     user_exam = (
-#         UserExam.objects
-#         .select_related("feedback", "exam", "exam__pack")
-#         .filter(
-#             user=request.user,
-#             exam_id=exam_id,
-#             is_deleted=False,
-#             status__in=FINISHED_STATUSES,
-#             exam__is_deleted=False,
-#         )
-#         .order_by("-attempt_no", "-created_at")
-#         .first()
-#     )
-#
-#     exists, abs_path, reason = voice_file_exists_for_user_exam(user_exam)
-#     transcript = ""
-#     if exists:
-#         transcript = transcribe_audio_file(abs_path)
-#
-#     logger.info(
-#         "VOICE CHECK | user=%s exam_id=%s user_exam_id=%s exists=%s reason=%s path=%s",
-#         request.user.id, exam_id, user_exam.id, exists, reason, abs_path
-#     )
-#
-#     return JsonResponse({
-#         "ok": True,
-#         "exam_id": int(exam_id),
-#         "user_exam_id": user_exam.id,
-#         "exists": exists,
-#         "reason": reason,
-#         "rel_path": user_exam.response_voice_path or "",
-#         "abs_path": abs_path,
-#         "transcript": transcript,   # ✨ NEW FIELD
-#     })
-
-def voice_file_exists_for_user_exam(user_exam):
-    rel_path = (user_exam.response_voice_path or "").strip()
-    if not rel_path:
-        return False, "", "empty_response_voice_path"
-
-    root = "/app/team3/static/team3/public/"
-    abs_path = os.path.join(root, rel_path)
-    last_checked = abs_path
-    if os.path.isfile(abs_path):
-        return True, abs_path, "found"
-
-    return False, last_checked, "not_found"
-#
-# def transcribe_audio_file(audio_path: str) -> str:
-#     if not os.path.isfile(audio_path):
-#         return ""
-#     model = get_whisper_model()
-#     try:
-#         result = model.transcribe(audio_path, language="en", fp16=False)
-#         return result["text"].strip()
-#     except Exception as e:
-#         logger.error(f"Whisper transcription failed for {audio_path}: {e}")
-#         return ""
-
-@api_login_required
-def speaking(request, exam_id: int):
-    return render(request, "team3/speaking.html")
-
 def _calc_remaining_seconds(user_exam: UserExam) -> int:
     if user_exam.remaining_seconds is None:
         user_exam.remaining_seconds = user_exam.exam.exam_time_seconds
@@ -871,13 +804,13 @@ def speaking_upload(request, user_exam_id: int):
         for chunk in f.chunks():
             out.write(chunk)
 
-    voice_map = parse_response_text(ue.response_text or "")
+    voice_map = parse_response_text(ue.response_voice_path or "")
     voice_map[qn] = rel_path
-    ue.response_text = build_response_text(voice_map)
+    ue.response_voice_path = build_response_text(voice_map)
 
     ue.remaining_seconds = _calc_remaining_seconds(ue)
     ue.last_seen_at = timezone.now()
-    ue.save(update_fields=["response_text", "remaining_seconds", "last_seen_at"])
+    ue.save(update_fields=["response_voice_path", "remaining_seconds", "last_seen_at"])
 
     return JsonResponse({
         "ok": True,
@@ -891,6 +824,7 @@ def speaking_upload(request, user_exam_id: int):
 @require_POST
 def speaking_submit(request, user_exam_id: int):
     ue = get_object_or_404(UserExam, id=user_exam_id, user=request.user, is_deleted=False)
+
     if ue.status in FINISHED_STATUSES:
         return JsonResponse({"ok": True})
 
@@ -900,8 +834,10 @@ def speaking_submit(request, user_exam_id: int):
     ue.paused_at = None
     ue.status = UserExamStatus.SUBMITTED
     ue.save(update_fields=["remaining_seconds", "last_seen_at", "is_paused", "paused_at", "status"])
-    return JsonResponse({"ok": True})
 
+    start_transcription_thread_after_commit(ue.id)
+
+    return JsonResponse({"ok": True, "transcription_started": True})
 
 @api_login_required
 @csrf_exempt
@@ -919,3 +855,84 @@ def speaking_exit(request, user_exam_id: int):
     ue.save(update_fields=["remaining_seconds", "is_paused", "status", "paused_at", "last_seen_at"])
 
     return JsonResponse({"ok": True, "redirect": "/team3/exams/"})
+
+def transcribe_audio_file(audio_path: str) -> str:
+    if not os.path.isfile(audio_path):
+        return ""
+    model = get_whisper_model()
+    try:
+        result = model.transcribe(audio_path, language="en", fp16=False)
+        return result["text"].strip()
+    except Exception as e:
+        logger.error(f"Whisper transcription failed for {audio_path}: {e}")
+        return ""
+
+def parse_kv_lines(raw: str) -> Dict[int, str]:
+    raw = (raw or "").strip()
+    if not raw:
+        return {}
+    out: Dict[int, str] = {}
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        m = _Q_LINE_RE.match(line)
+        if not m:
+            continue
+        out[int(m.group(1))] = (m.group(2) or "").strip()
+    return out
+
+def build_kv_lines(m: Dict[int, str]) -> str:
+    if not m:
+        return ""
+    return "\n".join([f"Q{qn}{KEY_SEP}{(m.get(qn) or '').strip()}" for qn in sorted(m.keys())]).strip()
+
+
+def _abs_from_rel(rel_path: str) -> str:
+    root = "/app/team3/static/team3/public/"
+    return os.path.join(root, rel_path)
+
+def transcribe_user_exam_voices(user_exam_id: int) -> None:
+    try:
+        ue = (
+            UserExam.objects
+            .select_related("exam")
+            .get(id=user_exam_id, is_deleted=False)
+        )
+    except UserExam.DoesNotExist:
+        return
+
+    if ue.status not in [UserExamStatus.SUBMITTED, UserExamStatus.REVIEWED]:
+        return
+
+    voice_map = parse_kv_lines(ue.response_voice_path or "")
+    if not voice_map:
+        return
+
+    transcript_map = {}
+    for qn, rel_path in voice_map.items():
+        abs_path = _abs_from_rel(rel_path)
+        if not abs_path or not os.path.isfile(abs_path):
+            transcript_map[qn] = ""
+            continue
+
+        txt = transcribe_audio_file(abs_path)
+        transcript_map[qn] = txt
+
+    ue.response_text = build_kv_lines(transcript_map)
+    ue.last_seen_at = timezone.now()
+
+    ue.save(update_fields=["response_text", "last_seen_at"])
+
+    logger.info("Whisper transcription done | user_exam_id=%s", ue.id)
+
+def start_transcription_thread_after_commit(user_exam_id: int) -> None:
+    def _start():
+        t = threading.Thread(
+            target=transcribe_user_exam_voices,
+            args=(user_exam_id,),
+            daemon=True,
+        )
+        t.start()
+
+    transaction.on_commit(_start)
