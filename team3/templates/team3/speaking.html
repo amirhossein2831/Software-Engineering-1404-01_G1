@@ -43,9 +43,9 @@
             <p class="question-text">{{ q.description }}</p>
 
             <div class="voice-actions">
-                <!-- record later -->
-                <button class="voice-btn" type="button" disabled title="Later">record voice</button>
-
+                <button class="voice-btn record-btn" type="button" data-qnum="{{ q.number }}">
+                    Record
+                </button>
                 <button class="voice-btn upload-btn" type="button" data-qnum="{{ q.number }}">
                     upload voice
                 </button>
@@ -73,7 +73,6 @@
     </div>
 
 </div>
-
 <script>
     let remaining = Number("{{ remaining_seconds|default:'0' }}");
     let paused = false;
@@ -102,7 +101,7 @@
             if (remaining <= 0) {
                 remaining = 0;
                 paused = true;
-                submitExam();
+                submitExam(); // auto submit when time is over
             }
         }
         timerEl.textContent = fmt(remaining);
@@ -132,8 +131,10 @@
             },
             body: data ? JSON.stringify(data) : "{}",
         });
+
         const text = await res.text();
         const ct = res.headers.get("content-type") || "";
+
         if (!res.ok) {
             console.error("POST failed", url, res.status, text.slice(0, 400));
             alert("Request failed: " + res.status);
@@ -164,6 +165,7 @@
 
         const text = await res.text();
         const ct = res.headers.get("content-type") || "";
+
         if (!res.ok) {
             console.error("UPLOAD failed", res.status, text.slice(0, 400));
             alert("Upload failed: " + res.status);
@@ -176,8 +178,7 @@
         return JSON.parse(text);
     }
 
-    // Hook upload buttons -> hidden inputs
-    document.querySelectorAll(".upload-btn").forEach(btn => {
+    document.querySelectorAll(".upload-btn").forEach((btn) => {
         btn.addEventListener("click", () => {
             const qnum = btn.dataset.qnum;
             const inp = document.querySelector(`.file-input[data-qnum="${qnum}"]`);
@@ -185,8 +186,7 @@
         });
     });
 
-    // On file selected -> upload
-    document.querySelectorAll(".file-input").forEach(inp => {
+    document.querySelectorAll(".file-input").forEach((inp) => {
         inp.addEventListener("change", async () => {
             const qnum = Number(inp.dataset.qnum);
             const file = inp.files && inp.files[0];
@@ -206,12 +206,15 @@
                 statusEl.textContent = "Upload failed";
             }
 
-            inp.value = ""; // reset
+            inp.value = "";
         });
     });
 
     pauseBtn.addEventListener("click", async () => {
         if (!paused) {
+            // If recording is active, stop it first
+            await stopAllRecordings();
+
             const data = await postJSON(urls.pause);
             if (data.ok) {
                 paused = true;
@@ -231,6 +234,7 @@
     });
 
     async function submitExam() {
+        await stopAllRecordings();
         const data = await postJSON(urls.submit);
         if (data.ok) {
             window.location.href = "/team3/feedbacks/";
@@ -240,10 +244,160 @@
     document.getElementById("submitBtn").addEventListener("click", submitExam);
 
     document.getElementById("exitBtn").addEventListener("click", async () => {
+        await stopAllRecordings();
         const data = await postJSON(urls.exit);
         if (data.ok) {
             window.location.href = data.redirect || "/team3/exams/";
         }
+    });
+
+    const recordState = {
+        perQ: new Map(),
+    };
+
+    function pickMimeType() {
+        const candidates = [
+            "audio/webm;codecs=opus",
+            "audio/webm",
+            "audio/ogg;codecs=opus",
+            "audio/ogg",
+        ];
+        for (const t of candidates) {
+            if (window.MediaRecorder && MediaRecorder.isTypeSupported(t)) return t;
+        }
+        return ""; // let browser choose
+    }
+
+    function makeFilenameFromMime(mime) {
+        if (!mime) return "recording.webm";
+        if (mime.includes("ogg")) return "recording.ogg";
+        return "recording.webm";
+    }
+
+    async function startRecording(qnum) {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            alert("Your browser does not support audio recording.");
+            return;
+        }
+
+        const existing = recordState.perQ.get(qnum);
+        if (existing && existing.isRecording) return;
+
+        let stream;
+        try {
+            stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        } catch (e) {
+            console.error("Mic permission error", e);
+            alert("Microphone permission denied.");
+            return;
+        }
+
+        const mimeType = pickMimeType();
+        let recorder;
+        try {
+            recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+        } catch (e) {
+            console.error("MediaRecorder init error", e);
+            alert("Recording is not supported in this browser.");
+            stream.getTracks().forEach((t) => t.stop());
+            return;
+        }
+
+        const chunks = [];
+        recorder.ondataavailable = (ev) => {
+            if (ev.data && ev.data.size > 0) chunks.push(ev.data);
+        };
+
+        recorder.onerror = (ev) => {
+            console.error("Recorder error", ev);
+        };
+
+        recorder.onstop = async () => {
+            try {
+                const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
+                const fileName = makeFilenameFromMime(recorder.mimeType);
+                const file = new File([blob], fileName, { type: blob.type });
+
+                const statusEl = document.getElementById(`status-q${qnum}`);
+                statusEl.textContent = "Uploading recorded audio...";
+
+                const data = await uploadFile(qnum, file);
+                if (data.ok) {
+                    statusEl.textContent = "Uploaded: " + data.rel_path;
+                    if (typeof data.remaining_seconds === "number") {
+                        remaining = data.remaining_seconds;
+                        timerEl.textContent = fmt(remaining);
+                    }
+                } else {
+                    statusEl.textContent = "Upload failed";
+                }
+            } finally {
+                // stop mic tracks
+                stream.getTracks().forEach((t) => t.stop());
+
+                recordState.perQ.set(qnum, { recorder: null, chunks: [], stream: null, isRecording: false });
+
+                // reset button UI
+                const btn = document.querySelector(`.record-btn[data-qnum="${qnum}"]`);
+                if (btn) {
+                    btn.textContent = "Record";
+                    btn.disabled = false;
+                }
+            }
+        };
+
+        recordState.perQ.set(qnum, { recorder, chunks, stream, isRecording: true });
+
+        // UI
+        const btn = document.querySelector(`.record-btn[data-qnum="${qnum}"]`);
+        if (btn) {
+            btn.textContent = "Stop";
+            btn.disabled = false;
+        }
+        const statusEl = document.getElementById(`status-q${qnum}`);
+        if (statusEl) statusEl.textContent = "Recording...";
+
+        recorder.start();
+    }
+
+    function stopRecording(qnum) {
+        const st = recordState.perQ.get(qnum);
+        if (!st || !st.recorder || !st.isRecording) return;
+
+        const btn = document.querySelector(`.record-btn[data-qnum="${qnum}"]`);
+        if (btn) btn.disabled = true;
+
+        try {
+            st.recorder.stop();
+        } catch (e) {
+            console.error("Stop error", e);
+        }
+    }
+
+    async function stopAllRecordings() {
+        for (const [qnum, st] of recordState.perQ.entries()) {
+            if (st && st.isRecording) stopRecording(qnum);
+        }
+    }
+
+    // Hook record buttons
+    document.querySelectorAll(".record-btn").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+            const qnum = Number(btn.dataset.qnum);
+            if (!qnum) return;
+
+            if (paused) {
+                alert("Resume the exam to record audio.");
+                return;
+            }
+
+            const st = recordState.perQ.get(qnum);
+            if (st && st.isRecording) {
+                stopRecording(qnum);
+            } else {
+                await startRecording(qnum);
+            }
+        });
     });
 </script>
 
