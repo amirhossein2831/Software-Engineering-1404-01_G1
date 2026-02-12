@@ -198,6 +198,17 @@ class UserExam(models.Model):
     status = models.CharField(max_length=20, choices=UserExamStatus.choices, default=UserExamStatus.DRAFT, verbose_name='Status')
     response_text = models.TextField(blank=True, null=True, verbose_name='Text Response')
     response_voice_path = models.CharField(max_length=500, blank=True, null=True, verbose_name='Voice File Path')
+    started_at = models.DateTimeField(null=True, blank=True)
+    last_seen_at = models.DateTimeField(null=True, blank=True)
+
+    # timer state (server-side truth)
+    remaining_seconds = models.PositiveIntegerField(null=True, blank=True)
+
+    is_paused = models.BooleanField(default=False)
+    paused_at = models.DateTimeField(null=True, blank=True)
+
+    # answers per question (simple + practical)
+    answers = models.JSONField(default=dict, blank=True)
     feedback = models.ForeignKey(
         Feedback,
         on_delete=models.SET_NULL,

@@ -8,6 +8,16 @@
     <link rel="stylesheet" href="{% static 'team3/styles/index.css' %}">
     <link rel="stylesheet" href="{% static 'styles/style.css' %}">
 </head>
+<div id="modal-overlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:9999;">
+    <div style="max-width:520px; margin:10vh auto; background:#fff; border-radius:16px; padding:20px;">
+        <h3 style="margin:0 0 10px;">این آزمون قبلاً انجام شده</h3>
+        <p style="margin:0 0 16px;">شما قبلاً این آزمون را ثبت کرده‌اید. برای مشاهده نتیجه به بخش فیدبک بروید.</p>
+        <div style="display:flex; gap:10px; justify-content:flex-end;">
+            <button id="modal-close" style="padding:10px 14px; border-radius:10px; border:1px solid #ccc; background:#fff;">باشه</button>
+            <a href="/team3/feedbacks/" style="padding:10px 14px; border-radius:10px; background:#211d63; color:#fff; text-decoration:none;">رفتن به فیدبک</a>
+        </div>
+    </div>
+</div>
 <body>
 <div class="container">
     <!-- HEADER SECTION (unchanged structure) -->
@@ -65,8 +75,8 @@
                 {% for p in packs %}
                 <div class="test-card">
                     <h3 class="test-title">{{ p.title }}</h3>
-                    <button class="test-btn" onclick="location.href='/team3/speaking?exam_id={{ p.sections.speaking }}'">Speaking</button>
-                    <button class="test-btn" onclick="location.href='/team3/writing?exam_id={{ p.sections.writing }}'">Writing</button>
+                    <button class="test-btn" onclick="location.href='/team3/speaking/{{ p.sections.speaking }}'">Speaking</button>
+                    <button class="test-btn" onclick="location.href='/team3/writing/{{ p.sections.writing }}'">Writing</button>
                     <button class="test-btn" disabled>Reading</button>
                     <button class="test-btn" disabled>Listening</button>
                 </div>
@@ -103,4 +113,28 @@
     </footer>
 </div>
 </body>
+<script>
+    function getParam(name) {
+        const u = new URL(window.location.href);
+        return u.searchParams.get(name);
+    }
+
+    const modal = getParam("modal");
+    if (modal === "already_done") {
+        const overlay = document.getElementById("modal-overlay");
+        overlay.style.display = "block";
+
+        document.getElementById("modal-close").addEventListener("click", () => {
+            overlay.style.display = "none";
+            const u = new URL(window.location.href);
+            u.searchParams.delete("modal");
+            u.searchParams.delete("exam_id");
+            window.history.replaceState({}, "", u.toString());
+        });
+
+        overlay.addEventListener("click", (e) => {
+            if (e.target === overlay) document.getElementById("modal-close").click();
+        });
+    }
+</script>
 </html>

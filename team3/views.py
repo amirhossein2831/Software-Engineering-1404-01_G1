@@ -1,11 +1,16 @@
 import logging
 import os
 from typing import Dict, List
-import whisper
+
+from django.urls import reverse
+# import whisper
+from django.utils import timezone
 from django.db import transaction
 from django.http import Http404
 from django.http import JsonResponse
-from django.shortcuts import render
+from django.shortcuts import render, get_object_or_404, redirect
+from django.views.decorators.csrf import ensure_csrf_cookie, csrf_exempt
+from django.views.decorators.http import require_POST
 from openai import OpenAI
 from core.auth import api_login_required
 from team3.models import ExamPack, Exam, ExamSystem, ExamSection, UserExam, UserExamStatus, Feedback
@@ -16,7 +21,7 @@ TEAM_NAME = "team3"
 
 KEY_SEP = "|||"
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY","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")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 OPENAI_TIMEOUT = int(os.getenv("OPENAI_TIMEOUT", "30"))
 client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=OPENAI_API_KEY)
@@ -42,13 +47,13 @@ SYSTEM_DISPLAY_FA = {
 if not OPENAI_API_KEY:
     raise RuntimeError("OPENAI_API_KEY is not set")
 
-
-_whisper_model = None
-def get_whisper_model():
-    global _whisper_model
-    if _whisper_model is None:
-        _whisper_model = whisper.load_model("tiny")
-    return _whisper_model
+#
+# _whisper_model = None
+# def get_whisper_model():
+#     global _whisper_model
+#     if _whisper_model is None:
+#         _whisper_model = whisper.load_model("tiny")
+#     return _whisper_model
 
 @api_login_required
 def ping(request):
@@ -60,6 +65,7 @@ def base(request):
 
 
 @api_login_required
+@csrf_exempt
 def exam(request):
     system_param = (request.GET.get("system") or "").upper()
     system = SYSTEM_MAP.get(system_param)
@@ -437,45 +443,45 @@ def build_items(user_exam: UserExam) -> List[dict]:
 
     return items
 
-
-@api_login_required
-def check_voice_file_exists(request):
-    exam_id = request.GET.get("exam_id")
-
-    user_exam = (
-        UserExam.objects
-        .select_related("feedback", "exam", "exam__pack")
-        .filter(
-            user=request.user,
-            exam_id=exam_id,
-            is_deleted=False,
-            status__in=FINISHED_STATUSES,
-            exam__is_deleted=False,
-        )
-        .order_by("-attempt_no", "-created_at")
-        .first()
-    )
-
-    exists, abs_path, reason = voice_file_exists_for_user_exam(user_exam)
-    transcript = ""
-    if exists:
-        transcript = transcribe_audio_file(abs_path)
-
-    logger.info(
-        "VOICE CHECK | user=%s exam_id=%s user_exam_id=%s exists=%s reason=%s path=%s",
-        request.user.id, exam_id, user_exam.id, exists, reason, abs_path
-    )
-
-    return JsonResponse({
-        "ok": True,
-        "exam_id": int(exam_id),
-        "user_exam_id": user_exam.id,
-        "exists": exists,
-        "reason": reason,
-        "rel_path": user_exam.response_voice_path or "",
-        "abs_path": abs_path,
-        "transcript": transcript,   # ✨ NEW FIELD
-    })
+#
+# @api_login_required
+# def check_voice_file_exists(request):
+#     exam_id = request.GET.get("exam_id")
+#
+#     user_exam = (
+#         UserExam.objects
+#         .select_related("feedback", "exam", "exam__pack")
+#         .filter(
+#             user=request.user,
+#             exam_id=exam_id,
+#             is_deleted=False,
+#             status__in=FINISHED_STATUSES,
+#             exam__is_deleted=False,
+#         )
+#         .order_by("-attempt_no", "-created_at")
+#         .first()
+#     )
+#
+#     exists, abs_path, reason = voice_file_exists_for_user_exam(user_exam)
+#     transcript = ""
+#     if exists:
+#         transcript = transcribe_audio_file(abs_path)
+#
+#     logger.info(
+#         "VOICE CHECK | user=%s exam_id=%s user_exam_id=%s exists=%s reason=%s path=%s",
+#         request.user.id, exam_id, user_exam.id, exists, reason, abs_path
+#     )
+#
+#     return JsonResponse({
+#         "ok": True,
+#         "exam_id": int(exam_id),
+#         "user_exam_id": user_exam.id,
+#         "exists": exists,
+#         "reason": reason,
+#         "rel_path": user_exam.response_voice_path or "",
+#         "abs_path": abs_path,
+#         "transcript": transcript,   # ✨ NEW FIELD
+#     })
 
 def voice_file_exists_for_user_exam(user_exam):
     rel_path = (user_exam.response_voice_path or "").strip()
@@ -489,17 +495,17 @@ def voice_file_exists_for_user_exam(user_exam):
         return True, abs_path, "found"
 
     return False, last_checked, "not_found"
-
-def transcribe_audio_file(audio_path: str) -> str:
-    if not os.path.isfile(audio_path):
-        return ""
-    model = get_whisper_model()
-    try:
-        result = model.transcribe(audio_path, language="en", fp16=False)
-        return result["text"].strip()
-    except Exception as e:
-        logger.error(f"Whisper transcription failed for {audio_path}: {e}")
-        return ""
+#
+# def transcribe_audio_file(audio_path: str) -> str:
+#     if not os.path.isfile(audio_path):
+#         return ""
+#     model = get_whisper_model()
+#     try:
+#         result = model.transcribe(audio_path, language="en", fp16=False)
+#         return result["text"].strip()
+#     except Exception as e:
+#         logger.error(f"Whisper transcription failed for {audio_path}: {e}")
+#         return ""
 
 @api_login_required
 def speaking(request):
@@ -508,3 +514,195 @@ def speaking(request):
 @api_login_required
 def writing(request):
     return render(request, "team3/writing.html")
+
+def _calc_remaining_seconds(user_exam: UserExam) -> int:
+    """
+    Returns remaining seconds based on server-side state.
+    """
+    if user_exam.remaining_seconds is None:
+        # first time initialization
+        user_exam.remaining_seconds = user_exam.exam.exam_time_seconds
+
+    if user_exam.is_paused:
+        return user_exam.remaining_seconds
+
+    # if running: subtract elapsed since last_seen_at (or started_at)
+    now = timezone.now()
+    anchor = user_exam.last_seen_at or user_exam.started_at or now
+    elapsed = int((now - anchor).total_seconds())
+    remaining = max(0, user_exam.remaining_seconds - elapsed)
+    return remaining
+
+@api_login_required
+@ensure_csrf_cookie
+@api_login_required
+def writing_exam(request, exam_id: int):
+    exam = get_object_or_404(
+        Exam.objects.select_related("pack").prefetch_related("questions"),
+        id=exam_id,
+        section=ExamSection.WRITING,
+        is_deleted=False,
+    )
+    if exam.pack and exam.pack.is_deleted:
+        raise Http404("Pack deleted")
+
+    # 1) If user already submitted/reviewed/graded this exam -> block
+    already_done = UserExam.objects.filter(
+        user=request.user,
+        exam=exam,
+        is_deleted=False,
+        status__in=FINISHED_STATUSES,
+    ).exists()
+
+    if already_done:
+        url = reverse("exam")
+        return redirect(f"{url}?system={exam.system.upper()}&modal=already_done&exam_id={exam.id}")
+
+    ue = (
+        UserExam.objects.filter(
+            user=request.user,
+            exam=exam,
+            is_deleted=False,
+        )
+        .exclude(status__in=FINISHED_STATUSES)
+        .order_by("-created_at")
+        .first()
+    )
+
+    # 3) Otherwise create first attempt (only once ever)
+    if not ue:
+        ue = UserExam.objects.create(
+            user=request.user,
+            exam=exam,
+            status=UserExamStatus.IN_PROGRESS,
+            started_at=timezone.now(),
+            last_seen_at=timezone.now(),
+            remaining_seconds=exam.exam_time_seconds,
+            is_paused=False,
+            answers={},
+            attempt_no=1,  # since you never allow retake
+        )
+
+    # update timing
+    ue.remaining_seconds = _calc_remaining_seconds(ue)
+    ue.last_seen_at = timezone.now()
+    ue.is_paused = False
+    ue.paused_at = None
+    ue.save(update_fields=["remaining_seconds", "last_seen_at", "is_paused", "paused_at"])
+
+    questions = list(exam.questions.filter(is_deleted=False).order_by("number"))
+    remaining = _calc_remaining_seconds(ue)
+
+    return render(request, "team3/writing_exam.html", {
+        "user_exam": ue,
+        "exam": exam,
+        "pack": exam.pack,
+        "questions": questions,
+        "remaining_seconds": remaining,
+        "answers": ue.answers or {},
+    })
+@api_login_required
+@csrf_exempt
+@require_POST
+def writing_pause(request, user_exam_id: int):
+    ue = get_object_or_404(UserExam, id=user_exam_id, user=request.user, is_deleted=False)
+
+    if ue.status in FINISHED_STATUSES:
+        return JsonResponse({"ok": False, "error": "Already finished"}, status=400)
+
+    remaining = _calc_remaining_seconds(ue)
+    ue.remaining_seconds = remaining
+    ue.is_paused = True
+    ue.paused_at = timezone.now()
+    ue.last_seen_at = timezone.now()
+    ue.save(update_fields=["remaining_seconds", "is_paused", "paused_at", "last_seen_at"])
+
+    return JsonResponse({"ok": True, "remaining_seconds": remaining})
+
+@api_login_required
+@csrf_exempt
+@require_POST
+def writing_resume(request, user_exam_id: int):
+    ue = get_object_or_404(UserExam, id=user_exam_id, user=request.user, is_deleted=False)
+
+    if ue.status in FINISHED_STATUSES:
+        return JsonResponse({"ok": False, "error": "Already finished"}, status=400)
+
+    # Resume without changing remaining (we already froze it on pause)
+    ue.is_paused = False
+    ue.paused_at = None
+    ue.last_seen_at = timezone.now()
+    ue.status = UserExamStatus.IN_PROGRESS
+    ue.save(update_fields=["is_paused", "paused_at", "last_seen_at", "status"])
+
+    return JsonResponse({"ok": True, "remaining_seconds": ue.remaining_seconds or ue.exam.exam_time_seconds})
+
+import json
+
+@api_login_required
+@csrf_exempt
+@require_POST
+def writing_autosave(request, user_exam_id: int):
+    ue = get_object_or_404(UserExam, id=user_exam_id, user=request.user, is_deleted=False)
+
+    if ue.status in FINISHED_STATUSES:
+        return JsonResponse({"ok": False, "error": "Already finished"}, status=400)
+
+    payload = json.loads(request.body.decode("utf-8") or "{}")
+    answers = payload.get("answers", {})
+
+    # merge (don’t wipe all if partial update)
+    current = ue.answers or {}
+    for k, v in answers.items():
+        current[str(k)] = v
+
+    # update remaining time if running
+    remaining = _calc_remaining_seconds(ue)
+    ue.remaining_seconds = remaining
+    ue.last_seen_at = timezone.now()
+    ue.answers = current
+    ue.save(update_fields=["answers", "remaining_seconds", "last_seen_at"])
+
+    return JsonResponse({"ok": True, "remaining_seconds": remaining})
+
+@api_login_required
+@csrf_exempt
+@require_POST
+def writing_submit(request, user_exam_id: int):
+    ue = get_object_or_404(UserExam, id=user_exam_id, user=request.user, is_deleted=False)
+
+    if ue.status in FINISHED_STATUSES:
+        return JsonResponse({"ok": True})  # idempotent
+
+    # final time calculation
+    remaining = _calc_remaining_seconds(ue)
+    ue.remaining_seconds = remaining
+    ue.last_seen_at = timezone.now()
+    ue.is_paused = False
+    ue.paused_at = None
+    ue.status = UserExamStatus.SUBMITTED
+
+    # if you still want a single text field too:
+    # ue.response_text = "\n\n".join(...)
+    ue.save(update_fields=["remaining_seconds", "last_seen_at", "is_paused", "paused_at", "status"])
+
+    return JsonResponse({"ok": True})
+
+@api_login_required
+@csrf_exempt
+@require_POST
+def writing_exit(request, user_exam_id: int):
+    ue = get_object_or_404(UserExam, id=user_exam_id, user=request.user, is_deleted=False)
+
+    if ue.status in FINISHED_STATUSES:
+        return JsonResponse({"ok": True})
+
+    remaining = _calc_remaining_seconds(ue)
+    ue.remaining_seconds = remaining
+    ue.is_paused = True
+    ue.status = UserExamStatus.DRAFT
+    ue.paused_at = timezone.now()
+    ue.last_seen_at = timezone.now()
+    ue.save(update_fields=["remaining_seconds", "is_paused", "status", "paused_at", "last_seen_at"])
+
+    return JsonResponse({"ok": True, "redirect": "/"} )

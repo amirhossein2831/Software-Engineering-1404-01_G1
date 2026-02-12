@@ -1,4 +1,5 @@
 {% load static %}
+{% load dict_extras %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -8,10 +9,8 @@
     <link rel="stylesheet" href="{% static 'team3/styles/writing.css' %}">
 </head>
 <body>
-
 <div class="exam-wrapper">
 
-    <!-- Header -->
     <div class="exam-header">
         <div class="user-info">
             <div class="user-avatar" aria-hidden="true">
@@ -21,45 +20,199 @@
                           fill="none"/>
                 </svg>
             </div>
-            <span class="username">name</span>
-            <span class="timer">59:02</span>
+            <span class="username">{{ request.user.lastname }} {{ request.user.firstname }}</span>
+            <span class="timer" id="timer">--:--</span>
         </div>
 
         <div class="exam-title">
-            <div>exam number 1</div>
-            <div class="subtitle">speaking</div>
+            <div>{{ pack.title|default:"Writing Exam" }}</div>
+            <div class="subtitle">{{ exam.get_section_display }}</div>
         </div>
 
         <div class="exam-actions">
-            <button class="btn-outline">توقف / ادامه</button>
-            <button class="btn-primary">خروج</button>
+            <button class="btn-outline" id="pauseBtn">Pause</button>
+            <button class="btn-primary" id="exitBtn">Exit</button>
         </div>
     </div>
 
     <div style="background-color: white;border-radius: 40px;padding: 30px 20px;margin-top: 20px">
-        <!-- Question Card (Light) -->
-        <div class="question-card" >
-            <h3>Question 1</h3>
-            <p class="question-text">how are you today?</p>
-
-            <textarea class="answer-box" placeholder="Type your answer here..."></textarea>
-        </div>
-
+        {% for q in questions %}
         <div class="question-card">
-            <h3>Question 1</h3>
-            <p class="question-text">how are you today?</p>
-
-            <textarea class="answer-box" placeholder="Type your answer here..."></textarea>
+            <h3>Question {{ q.number }}</h3>
+            <p class="question-text">{{ q.description }}</p>
+            <textarea class="answer-box answer"
+                      data-qid="{{ q.id }}"
+                      placeholder="Type your answer here...">{{ answers|get_item:q.id }}</textarea>
         </div>
+        {% endfor %}
 
-        <!-- Finish Button -->
         <div class="finish-wrapper">
-            <button class="finish-btn">Finish</button>
+            <button class="finish-btn" id="submitBtn">Finish</button>
         </div>
     </div>
 
-
 </div>
+<script>
+    let remaining = Number("{{ remaining_seconds|default:'0' }}");
+    let paused = false;
+
+    // Django-generated endpoints (no hardcoding)
+    const urls = {
+        pause: "{% url 'writing_pause' user_exam.id %}",
+        resume: "{% url 'writing_resume' user_exam.id %}",
+        autosave: "{% url 'writing_autosave' user_exam.id %}",
+        submit: "{% url 'writing_submit' user_exam.id %}",
+        exit: "{% url 'writing_exit' user_exam.id %}",
+    };
+
+    const timerEl = document.getElementById("timer");
+    const pauseBtn = document.getElementById("pauseBtn");
+    const submitBtn = document.getElementById("submitBtn");
+    const exitBtn = document.getElementById("exitBtn");
+
+    function fmt(sec) {
+        sec = Math.max(0, sec);
+        const m = Math.floor(sec / 60);
+        const s = sec % 60;
+        return String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0");
+    }
+
+    function tick() {
+        if (!paused) {
+            remaining -= 1;
+            if (remaining <= 0) {
+                remaining = 0;
+                paused = true;
+                submitExam(); // auto-submit on timeout
+            }
+        }
+        timerEl.textContent = fmt(remaining);
+    }
+
+    timerEl.textContent = fmt(remaining);
+    setInterval(tick, 1000);
+
+    function getAnswersPayload() {
+        const answers = {};
+        document.querySelectorAll(".answer").forEach(t => {
+            answers[t.dataset.qid] = t.value;
+        });
+        return answers;
+    }
+
+    // cursor goes to the end on focus
+    document.querySelectorAll(".answer").forEach(t => {
+        t.addEventListener("focus", () => {
+            const len = t.value.length;
+            t.setSelectionRange(len, len);
+        });
+    });
+
+    function getCookie(name) {
+        const cookies = document.cookie ? document.cookie.split("; ") : [];
+        for (const c of cookies) {
+            const [k, ...v] = c.split("=");
+            if (k === name) return decodeURIComponent(v.join("="));
+        }
+        return null;
+    }
+
+    async function postJSON(url, data) {
+        const csrftoken = getCookie("csrftoken");
+
+        const res = await fetch(url, {
+            method: "POST",
+            credentials: "same-origin", // send session + csrftoken cookies
+            headers: {
+                "Content-Type": "application/json",
+                "X-CSRFToken": csrftoken || "",
+                "X-Requested-With": "XMLHttpRequest",
+            },
+            body: data ? JSON.stringify(data) : "{}",
+        });
+
+        const contentType = res.headers.get("content-type") || "";
+        const text = await res.text();
+
+        // If something fails, you'll SEE why in console
+        if (!res.ok) {
+            console.error("POST failed:", url, res.status, text.slice(0, 400));
+            alert(`Request failed: ${res.status} (see console)`);
+            return { ok: false, status: res.status, raw: text };
+        }
+
+        if (!contentType.includes("application/json")) {
+            console.error("Expected JSON but got:", contentType, text.slice(0, 400));
+            alert("Not JSON response (see console).");
+            return { ok: false, raw: text };
+        }
+
+        return JSON.parse(text);
+    }
+
+    async function autosave() {
+        if (paused) return;
+
+        const data = await postJSON(urls.autosave, {
+            answers: getAnswersPayload(),
+        });
+
+        if (data.ok && typeof data.remaining_seconds === "number") {
+            remaining = data.remaining_seconds; // server truth
+            timerEl.textContent = fmt(remaining);
+        }
+    }
+
+    // autosave every 10 seconds
+    setInterval(autosave, 10000);
+
+    // autosave on typing (debounced)
+    let typingTimer = null;
+    document.querySelectorAll(".answer").forEach(t => {
+        t.addEventListener("input", () => {
+            clearTimeout(typingTimer);
+            typingTimer = setTimeout(autosave, 800);
+        });
+    });
+
+    pauseBtn.addEventListener("click", async () => {
+        if (!paused) {
+            const data = await postJSON(urls.pause);
+            if (data.ok) {
+                paused = true;
+                pauseBtn.textContent = "Resume";
+                remaining = data.remaining_seconds ?? remaining;
+                timerEl.textContent = fmt(remaining);
+            }
+        } else {
+            const data = await postJSON(urls.resume);
+            if (data.ok) {
+                paused = false;
+                pauseBtn.textContent = "Pause";
+                remaining = data.remaining_seconds ?? remaining;
+                timerEl.textContent = fmt(remaining);
+            }
+        }
+    });
+
+    async function submitExam() {
+        await autosave();
+        const data = await postJSON(urls.submit);
+        if (data.ok) {
+            window.location.href = "/team3/feedbacks/";
+        }
+    }
+
+    submitBtn.addEventListener("click", submitExam);
+
+    exitBtn.addEventListener("click", async () => {
+        await autosave();
+        const data = await postJSON(urls.exit);
+        if (data.ok) {
+            window.location.href = data.redirect || "/team3/";
+        }
+    });
+</script>
 
 </body>
 </html>
