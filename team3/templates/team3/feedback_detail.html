@@ -68,6 +68,17 @@
 
         <section class="tests-section">
             <div class="feedback-grid" style="padding:0 20px;">
+                {% if is_processing_speaking %}
+                <div class="test-card test-card--full" style="text-align:center;padding:40px;">
+                    <h3>در حال پردازش فایل های صوتی شما هستیم...</h3>
+                    <p style="margin-top:15px;">
+                        فایل‌های صوتی شما در حال تبدیل به متن هستند.<br>
+                        لطفاً چند لحظه بعد این صفحه را دوباره بررسی یا رفرش کنید.
+                    </p>
+                    <div style="margin-top:20px; font-size: 22px; opacity: 0.7;">⏳</div>
+                </div>
+
+                {% else %}
                 {% if items %}
                 {% for it in items %}
                 <div>
@@ -82,16 +93,17 @@
                         {% if it.feedback %}
                         {{ it.feedback }}
                         {% else %}
-                        <em>فیدبک هنوز آماده نیست.</em>
+                        <em>Feedback is not ready yet.</em>
                         {% endif %}
                     </div>
                 </div>
                 {% endfor %}
                 {% else %}
                 <div class="test-card test-card--full">
-                    <h3 class="test-title">سوالی برای این آزمون پیدا نشد</h3>
-                    <p class="test-description">لطفاً بررسی کنید سوال‌ها برای این Exam ثبت شده باشند.</p>
+                    <h3 class="test-title">No questions found for this exam</h3>
+                    <p class="test-description">Please make sure questions are created for this Exam.</p>
                 </div>
+                {% endif %}
                 {% endif %}
             </div>
         </section>

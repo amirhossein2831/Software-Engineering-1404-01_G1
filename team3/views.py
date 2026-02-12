@@ -55,7 +55,6 @@ SYSTEM_DISPLAY_FA = {
 if not OPENAI_API_KEY:
     raise RuntimeError("OPENAI_API_KEY is not set")
 
-
 _whisper_model = None
 def get_whisper_model():
     global _whisper_model
@@ -70,7 +69,6 @@ def ping(request):
 
 def base(request):
     return render(request, f"{TEAM_NAME}/index.html")
-
 
 @api_login_required
 @csrf_exempt
@@ -196,6 +194,11 @@ def feedback_detail(request):
 
     exam = user_exam.exam
 
+    is_speaking = (exam.section == ExamSection.SPEAKING)
+    is_processing_speaking = (
+            is_speaking and not (user_exam.response_text or "").strip()
+    )
+
     has_feedback = (
             bool(user_exam.feedback_id)
             and user_exam.feedback is not None
@@ -203,7 +206,7 @@ def feedback_detail(request):
             and bool((user_exam.feedback.description or "").strip())
     )
 
-    if not has_feedback:
+    if not has_feedback and not is_processing_speaking:
         prompt = build_openai_prompt(exam, user_exam)
         generated_text = call_openai_for_feedback(prompt)
         generated_text = normalize_openai_feedback_text(generated_text)
@@ -229,21 +232,11 @@ def feedback_detail(request):
         "section": exam.section,
         "has_feedback": has_feedback,
         "items": items,
-
-        "debug": {
-            "exam_id": str(exam_id),
-            "user_exam_id": user_exam.id,
-            "attempt_no": user_exam.attempt_no,
-            "status": user_exam.status,
-            "has_feedback": has_feedback,
-            "feedback_id": user_exam.feedback_id,
-            "feedback_desc_len": len((user_exam.feedback.description or "") if user_exam.feedback else ""),
-            "response_len": len(user_exam.response_text or ""),
-            "items_len": len(items),
-        }
+        "is_processing_speaking": is_processing_speaking,
     }
 
     return render(request, "team3/feedback_detail.html", context)
+
 def build_openai_prompt(exam, user_exam: UserExam) -> str:
     qs = list(
         exam.questions
@@ -368,7 +361,6 @@ def parse_feedback_map(description: str) -> Dict[int, str]:
 
     return result
 
-
 def split_answers_by_question_count(raw: str, question_count: int) -> Dict[int, str]:
     raw = (raw or "").strip()
     if not raw:
@@ -402,7 +394,6 @@ def split_answers_by_question_count(raw: str, question_count: int) -> Dict[int, 
         ans_map[qn] = ans
 
     return ans_map
-
 
 def build_items(user_exam: UserExam) -> List[dict]:
     exam = user_exam.exam
