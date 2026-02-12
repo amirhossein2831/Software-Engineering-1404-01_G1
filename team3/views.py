@@ -508,12 +508,8 @@ def voice_file_exists_for_user_exam(user_exam):
 #         return ""
 
 @api_login_required
-def speaking(request):
+def speaking(request, exam_id: int):
     return render(request, "team3/speaking.html")
-
-@api_login_required
-def writing(request):
-    return render(request, "team3/writing.html")
 
 def _calc_remaining_seconds(user_exam: UserExam) -> int:
     """
@@ -569,7 +565,6 @@ def writing_exam(request, exam_id: int):
         .first()
     )
 
-    # 3) Otherwise create first attempt (only once ever)
     if not ue:
         ue = UserExam.objects.create(
             user=request.user,
@@ -580,10 +575,9 @@ def writing_exam(request, exam_id: int):
             remaining_seconds=exam.exam_time_seconds,
             is_paused=False,
             answers={},
-            attempt_no=1,  # since you never allow retake
+            attempt_no=1,
         )
 
-    # update timing
     ue.remaining_seconds = _calc_remaining_seconds(ue)
     ue.last_seen_at = timezone.now()
     ue.is_paused = False
@@ -593,7 +587,7 @@ def writing_exam(request, exam_id: int):
     questions = list(exam.questions.filter(is_deleted=False).order_by("number"))
     remaining = _calc_remaining_seconds(ue)
 
-    return render(request, "team3/writing_exam.html", {
+    return render(request, f"{TEAM_NAME}/writing.html", {
         "user_exam": ue,
         "exam": exam,
         "pack": exam.pack,
@@ -601,6 +595,7 @@ def writing_exam(request, exam_id: int):
         "remaining_seconds": remaining,
         "answers": ue.answers or {},
     })
+
 @api_login_required
 @csrf_exempt
 @require_POST
