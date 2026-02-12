@@ -1,4 +1,5 @@
 {% load static %}
+{% load dict_extras %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -12,85 +13,239 @@
 
 <div class="exam-wrapper">
 
-    <!-- Header -->
     <div class="exam-header">
         <div class="user-info">
             <div class="user-avatar" aria-hidden="true">
                 <svg width="30" height="30" viewBox="0 0 30 30" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <circle cx="15" cy="10" r="5" fill="#647eb4"/>
-                    <path d="M5 25C5 20 9 17 15 17C21 17 25 20 25 25" stroke="#647eb4" stroke-width="2"
-                          fill="none"/>
+                    <path d="M5 25C5 20 9 17 15 17C21 17 25 20 25 25" stroke="#647eb4" stroke-width="2" fill="none"/>
                 </svg>
             </div>
-            <span class="username">name</span>
-            <span class="timer">59:02</span>
+            <span class="username">{{ request.user.first_name }} {{ request.user.last_name }}</span>
+            <span class="timer" id="timer">--:--</span>
         </div>
 
         <div class="exam-title">
-            <div>exam number 1</div>
-            <div class="subtitle">speaking</div>
+            <div>{{ pack.title|default:"Speaking Exam" }}</div>
+            <div class="subtitle">{{ exam.get_section_display }}</div>
         </div>
 
         <div class="exam-actions">
-            <button class="btn-outline">توقف / ادامه</button>
-            <button class="btn-primary">خروج</button>
+            <button class="btn-outline" id="pauseBtn">Pause</button>
+            <button class="btn-primary" id="exitBtn">Exit</button>
         </div>
     </div>
 
-    <div class="exam-body" style="background-color: white;border-radius: 40px;padding: 30px 20px;margin-top: 20px">
-
-        <!-- Question cards -->
+    <div class="exam-body" style="background-color:white;border-radius:40px;padding:30px 20px;margin-top:20px">
+        {% for q in questions %}
         <div class="question-card">
-            <h3>Question 1</h3>
-            <p class="question-text">how are you today?</p>
+            <h3>Question {{ q.number }}</h3>
+            <p class="question-text">{{ q.description }}</p>
 
             <div class="voice-actions">
-                <button class="voice-btn" type="button">record voice</button>
+                <!-- record later -->
+                <button class="voice-btn" type="button" disabled title="Later">record voice</button>
 
-                <!-- Upload: button + hidden input -->
-                <button class="voice-btn" type="button" onclick="document.getElementById('upload-q1').click()">
+                <button class="voice-btn upload-btn" type="button" data-qnum="{{ q.number }}">
                     upload voice
                 </button>
-                <input id="upload-q1" class="voice-input" type="file" accept="audio/*" />
+
+                <input class="voice-input file-input"
+                       type="file"
+                       accept="audio/*"
+                       data-qnum="{{ q.number }}"
+                       style="display:none" />
+
+                <div class="upload-status" id="status-q{{ q.number }}" style="margin-top:8px;font-size:13px;">
+                    {% if voice_map|get_item:q.number %}
+                    Uploaded: {{ voice_map|get_item:q.number }}
+                    {% else %}
+                    No file uploaded
+                    {% endif %}
+                </div>
             </div>
         </div>
+        {% endfor %}
 
-        <div class="question-card">
-            <h3>Question 2</h3>
-            <p class="question-text">tell me about your daily routine</p>
-
-            <div class="voice-actions">
-                <button class="voice-btn" type="button">record voice</button>
-
-                <button class="voice-btn" type="button" onclick="document.getElementById('upload-q2').click()">
-                    upload voice
-                </button>
-                <input id="upload-q2" class="voice-input" type="file" accept="audio/*" />
-            </div>
-        </div>
-
-        <div class="question-card">
-            <h3>Question 3</h3>
-            <p class="question-text">do you prefer city life or countryside?</p>
-
-            <div class="voice-actions">
-                <button class="voice-btn" type="button">record voice</button>
-
-                <button class="voice-btn" type="button" onclick="document.getElementById('upload-q3').click()">
-                    upload voice
-                </button>
-                <input id="upload-q3" class="voice-input" type="file" accept="audio/*" />
-            </div>
-        </div>
-
-        <!-- Finish Button -->
         <div class="finish-wrapper">
-            <button class="finish-btn">Finish</button>
+            <button class="finish-btn" id="submitBtn">Finish</button>
         </div>
-
     </div>
 
 </div>
+
+<script>
+    let remaining = Number("{{ remaining_seconds|default:'0' }}");
+    let paused = false;
+
+    const urls = {
+        pause: "{% url 'speaking_pause' user_exam.id %}",
+        resume: "{% url 'speaking_resume' user_exam.id %}",
+        upload: "{% url 'speaking_upload' user_exam.id %}",
+        submit: "{% url 'speaking_submit' user_exam.id %}",
+        exit: "{% url 'speaking_exit' user_exam.id %}",
+    };
+
+    const timerEl = document.getElementById("timer");
+    const pauseBtn = document.getElementById("pauseBtn");
+
+    function fmt(sec) {
+        sec = Math.max(0, sec);
+        const m = Math.floor(sec / 60);
+        const s = sec % 60;
+        return String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0");
+    }
+
+    function tick() {
+        if (!paused) {
+            remaining -= 1;
+            if (remaining <= 0) {
+                remaining = 0;
+                paused = true;
+                submitExam();
+            }
+        }
+        timerEl.textContent = fmt(remaining);
+    }
+
+    timerEl.textContent = fmt(remaining);
+    setInterval(tick, 1000);
+
+    function getCookie(name) {
+        const cookies = document.cookie ? document.cookie.split("; ") : [];
+        for (const c of cookies) {
+            const [k, ...v] = c.split("=");
+            if (k === name) return decodeURIComponent(v.join("="));
+        }
+        return null;
+    }
+
+    async function postJSON(url, data) {
+        const csrftoken = getCookie("csrftoken");
+        const res = await fetch(url, {
+            method: "POST",
+            credentials: "same-origin",
+            headers: {
+                "Content-Type": "application/json",
+                "X-CSRFToken": csrftoken || "",
+                "X-Requested-With": "XMLHttpRequest",
+            },
+            body: data ? JSON.stringify(data) : "{}",
+        });
+        const text = await res.text();
+        const ct = res.headers.get("content-type") || "";
+        if (!res.ok) {
+            console.error("POST failed", url, res.status, text.slice(0, 400));
+            alert("Request failed: " + res.status);
+            return { ok: false };
+        }
+        if (!ct.includes("application/json")) {
+            console.error("Expected JSON but got", ct, text.slice(0, 400));
+            return { ok: false };
+        }
+        return JSON.parse(text);
+    }
+
+    async function uploadFile(qnum, file) {
+        const csrftoken = getCookie("csrftoken");
+        const fd = new FormData();
+        fd.append("qnum", String(qnum));
+        fd.append("file", file);
+
+        const res = await fetch(urls.upload, {
+            method: "POST",
+            credentials: "same-origin",
+            headers: {
+                "X-CSRFToken": csrftoken || "",
+                "X-Requested-With": "XMLHttpRequest",
+            },
+            body: fd,
+        });
+
+        const text = await res.text();
+        const ct = res.headers.get("content-type") || "";
+        if (!res.ok) {
+            console.error("UPLOAD failed", res.status, text.slice(0, 400));
+            alert("Upload failed: " + res.status);
+            return { ok: false };
+        }
+        if (!ct.includes("application/json")) {
+            console.error("Expected JSON but got", ct, text.slice(0, 400));
+            return { ok: false };
+        }
+        return JSON.parse(text);
+    }
+
+    // Hook upload buttons -> hidden inputs
+    document.querySelectorAll(".upload-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+            const qnum = btn.dataset.qnum;
+            const inp = document.querySelector(`.file-input[data-qnum="${qnum}"]`);
+            inp.click();
+        });
+    });
+
+    // On file selected -> upload
+    document.querySelectorAll(".file-input").forEach(inp => {
+        inp.addEventListener("change", async () => {
+            const qnum = Number(inp.dataset.qnum);
+            const file = inp.files && inp.files[0];
+            if (!file) return;
+
+            const statusEl = document.getElementById(`status-q${qnum}`);
+            statusEl.textContent = "Uploading...";
+
+            const data = await uploadFile(qnum, file);
+            if (data.ok) {
+                statusEl.textContent = "Uploaded: " + data.rel_path;
+                if (typeof data.remaining_seconds === "number") {
+                    remaining = data.remaining_seconds;
+                    timerEl.textContent = fmt(remaining);
+                }
+            } else {
+                statusEl.textContent = "Upload failed";
+            }
+
+            inp.value = ""; // reset
+        });
+    });
+
+    pauseBtn.addEventListener("click", async () => {
+        if (!paused) {
+            const data = await postJSON(urls.pause);
+            if (data.ok) {
+                paused = true;
+                pauseBtn.textContent = "Resume";
+                remaining = data.remaining_seconds ?? remaining;
+                timerEl.textContent = fmt(remaining);
+            }
+        } else {
+            const data = await postJSON(urls.resume);
+            if (data.ok) {
+                paused = false;
+                pauseBtn.textContent = "Pause";
+                remaining = data.remaining_seconds ?? remaining;
+                timerEl.textContent = fmt(remaining);
+            }
+        }
+    });
+
+    async function submitExam() {
+        const data = await postJSON(urls.submit);
+        if (data.ok) {
+            window.location.href = "/team3/feedbacks/";
+        }
+    }
+
+    document.getElementById("submitBtn").addEventListener("click", submitExam);
+
+    document.getElementById("exitBtn").addEventListener("click", async () => {
+        const data = await postJSON(urls.exit);
+        if (data.ok) {
+            window.location.href = data.redirect || "/team3/exams/";
+        }
+    });
+</script>
 
 </body>
 </html>

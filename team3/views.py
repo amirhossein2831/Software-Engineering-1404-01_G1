@@ -1,6 +1,7 @@
 import logging
 import os
 import re
+import uuid
 from typing import Dict, List
 import json
 
@@ -740,3 +741,181 @@ def build_response_text(answer_map: Dict[int, str]) -> str:
         lines.append(f"Q{qn}{KEY_SEP}{ans}")
 
     return "\n".join(lines).strip()
+
+@ensure_csrf_cookie
+@api_login_required
+def speaking_exam(request, exam_id: int):
+    exam = get_object_or_404(
+        Exam.objects.select_related("pack").prefetch_related("questions"),
+        id=exam_id,
+        section=ExamSection.SPEAKING,
+        is_deleted=False,
+    )
+
+    already_done = UserExam.objects.filter(
+        user=request.user,
+        exam=exam,
+        is_deleted=False,
+        status__in=FINISHED_STATUSES,
+    ).exists()
+
+    if already_done:
+        url = reverse("exam")
+        return redirect(f"{url}?system={exam.system.upper()}&modal=already_done&exam_id={exam.id}")
+
+    ue = (
+        UserExam.objects.filter(user=request.user, exam=exam, is_deleted=False)
+        .exclude(status__in=FINISHED_STATUSES)
+        .order_by("-created_at")
+        .first()
+    )
+
+    if not ue:
+        ue = UserExam.objects.create(
+            user=request.user,
+            exam=exam,
+            attempt_no=1,
+            status=UserExamStatus.IN_PROGRESS,
+            started_at=timezone.now(),
+            last_seen_at=timezone.now(),
+            remaining_seconds=exam.exam_time_seconds,
+            is_paused=False,
+        )
+
+    ue.remaining_seconds = _calc_remaining_seconds(ue)
+    ue.last_seen_at = timezone.now()
+    ue.is_paused = False
+    ue.paused_at = None
+    if ue.status == UserExamStatus.DRAFT:
+        ue.status = UserExamStatus.IN_PROGRESS
+    ue.save(update_fields=["remaining_seconds", "last_seen_at", "is_paused", "paused_at", "status"])
+
+    questions = list(
+        exam.questions.filter(is_deleted=False).order_by("number").values("id", "number", "description")
+    )
+
+    voice_map_int = parse_response_text(ue.response_text or "")
+    voice_map = {str(k): v for k, v in voice_map_int.items()}
+
+    return render(request, f"{TEAM_NAME}/speaking.html", {
+        "user_exam": ue,
+        "exam": exam,
+        "pack": exam.pack,
+        "questions": questions,
+        "remaining_seconds": ue.remaining_seconds or exam.exam_time_seconds,
+        "voice_map": voice_map,
+    })
+
+@api_login_required
+@csrf_exempt
+@require_POST
+def speaking_pause(request, user_exam_id: int):
+    ue = get_object_or_404(UserExam, id=user_exam_id, user=request.user, is_deleted=False)
+    if ue.status in FINISHED_STATUSES:
+        return JsonResponse({"ok": False, "error": "Already finished"}, status=400)
+
+    ue.remaining_seconds = _calc_remaining_seconds(ue)
+    ue.is_paused = True
+    ue.paused_at = timezone.now()
+    ue.last_seen_at = timezone.now()
+    ue.save(update_fields=["remaining_seconds", "is_paused", "paused_at", "last_seen_at"])
+    return JsonResponse({"ok": True, "remaining_seconds": ue.remaining_seconds})
+
+
+@api_login_required
+@csrf_exempt
+@require_POST
+def speaking_resume(request, user_exam_id: int):
+    ue = get_object_or_404(UserExam, id=user_exam_id, user=request.user, is_deleted=False)
+    if ue.status in FINISHED_STATUSES:
+        return JsonResponse({"ok": False, "error": "Already finished"}, status=400)
+
+    ue.is_paused = False
+    ue.paused_at = None
+    ue.last_seen_at = timezone.now()
+    ue.status = UserExamStatus.IN_PROGRESS
+    ue.save(update_fields=["is_paused", "paused_at", "last_seen_at", "status"])
+    return JsonResponse({"ok": True, "remaining_seconds": ue.remaining_seconds or ue.exam.exam_time_seconds})
+
+@api_login_required
+@csrf_exempt
+@require_POST
+def speaking_upload(request, user_exam_id: int):
+    ue = get_object_or_404(UserExam, id=user_exam_id, user=request.user, is_deleted=False)
+    if ue.status in FINISHED_STATUSES:
+        return JsonResponse({"ok": False, "error": "Already finished"}, status=400)
+
+    qnum_raw = (request.POST.get("qnum") or "").strip()
+    if not qnum_raw.isdigit():
+        return JsonResponse({"ok": False, "error": "qnum is required"}, status=400)
+    qn = int(qnum_raw)
+
+    f = request.FILES.get("file")
+    if not f:
+        return JsonResponse({"ok": False, "error": "file is required"}, status=400)
+
+    orig_name = f.name or "audio"
+    ext = os.path.splitext(orig_name)[1].lower()
+    if ext not in [".mp3", ".wav", ".m4a", ".ogg", ".aac", ".webm"]:
+        return JsonResponse({"ok": False, "error": "unsupported file type"}, status=400)
+
+    root = "/app/team3/static/team3/public/"
+    rel_dir = "voices"
+    os.makedirs(os.path.join(root, rel_dir), exist_ok=True)
+
+    filename = f"ue{ue.id}_q{qn}_{uuid.uuid4().hex}{ext}"
+    rel_path = f"{rel_dir}/{filename}"
+    abs_path = os.path.join(root, rel_path)
+
+    with open(abs_path, "wb") as out:
+        for chunk in f.chunks():
+            out.write(chunk)
+
+    voice_map = parse_response_text(ue.response_text or "")
+    voice_map[qn] = rel_path
+    ue.response_text = build_response_text(voice_map)
+
+    ue.remaining_seconds = _calc_remaining_seconds(ue)
+    ue.last_seen_at = timezone.now()
+    ue.save(update_fields=["response_text", "remaining_seconds", "last_seen_at"])
+
+    return JsonResponse({
+        "ok": True,
+        "qnum": qn,
+        "rel_path": rel_path,
+        "remaining_seconds": ue.remaining_seconds,
+    })
+
+@api_login_required
+@csrf_exempt
+@require_POST
+def speaking_submit(request, user_exam_id: int):
+    ue = get_object_or_404(UserExam, id=user_exam_id, user=request.user, is_deleted=False)
+    if ue.status in FINISHED_STATUSES:
+        return JsonResponse({"ok": True})
+
+    ue.remaining_seconds = _calc_remaining_seconds(ue)
+    ue.last_seen_at = timezone.now()
+    ue.is_paused = False
+    ue.paused_at = None
+    ue.status = UserExamStatus.SUBMITTED
+    ue.save(update_fields=["remaining_seconds", "last_seen_at", "is_paused", "paused_at", "status"])
+    return JsonResponse({"ok": True})
+
+
+@api_login_required
+@csrf_exempt
+@require_POST
+def speaking_exit(request, user_exam_id: int):
+    ue = get_object_or_404(UserExam, id=user_exam_id, user=request.user, is_deleted=False)
+    if ue.status in FINISHED_STATUSES:
+        return JsonResponse({"ok": True, "redirect": "/team3/feedbacks/"})
+
+    ue.remaining_seconds = _calc_remaining_seconds(ue)
+    ue.is_paused = True
+    ue.status = UserExamStatus.DRAFT
+    ue.paused_at = timezone.now()
+    ue.last_seen_at = timezone.now()
+    ue.save(update_fields=["remaining_seconds", "is_paused", "status", "paused_at", "last_seen_at"])
+
+    return JsonResponse({"ok": True, "redirect": "/team3/exams/"})
