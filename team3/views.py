@@ -1,9 +1,11 @@
 import logging
 import os
+import re
 from typing import Dict, List
+import json
 
-from django.urls import reverse
 # import whisper
+from django.urls import reverse
 from django.utils import timezone
 from django.db import transaction
 from django.http import Http404
@@ -20,8 +22,12 @@ logger = logging.getLogger(__name__)
 TEAM_NAME = "team3"
 
 KEY_SEP = "|||"
+_Q_LINE_RE = re.compile(
+    r"^Q(\d+)\s*" + re.escape(KEY_SEP) + r"\s*(.*)$",
+    re.IGNORECASE,
+)
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY","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")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 OPENAI_TIMEOUT = int(os.getenv("OPENAI_TIMEOUT", "30"))
 client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=OPENAI_API_KEY)
@@ -512,17 +518,12 @@ def speaking(request, exam_id: int):
     return render(request, "team3/speaking.html")
 
 def _calc_remaining_seconds(user_exam: UserExam) -> int:
-    """
-    Returns remaining seconds based on server-side state.
-    """
     if user_exam.remaining_seconds is None:
-        # first time initialization
         user_exam.remaining_seconds = user_exam.exam.exam_time_seconds
 
     if user_exam.is_paused:
         return user_exam.remaining_seconds
 
-    # if running: subtract elapsed since last_seen_at (or started_at)
     now = timezone.now()
     anchor = user_exam.last_seen_at or user_exam.started_at or now
     elapsed = int((now - anchor).total_seconds())
@@ -542,7 +543,6 @@ def writing_exam(request, exam_id: int):
     if exam.pack and exam.pack.is_deleted:
         raise Http404("Pack deleted")
 
-    # 1) If user already submitted/reviewed/graded this exam -> block
     already_done = UserExam.objects.filter(
         user=request.user,
         exam=exam,
@@ -569,31 +569,38 @@ def writing_exam(request, exam_id: int):
         ue = UserExam.objects.create(
             user=request.user,
             exam=exam,
+            attempt_no=1,
             status=UserExamStatus.IN_PROGRESS,
             started_at=timezone.now(),
             last_seen_at=timezone.now(),
             remaining_seconds=exam.exam_time_seconds,
             is_paused=False,
-            answers={},
-            attempt_no=1,
         )
 
+    # update timer state
     ue.remaining_seconds = _calc_remaining_seconds(ue)
     ue.last_seen_at = timezone.now()
     ue.is_paused = False
     ue.paused_at = None
-    ue.save(update_fields=["remaining_seconds", "last_seen_at", "is_paused", "paused_at"])
+    if ue.status == UserExamStatus.DRAFT:
+        ue.status = UserExamStatus.IN_PROGRESS
+    ue.save(update_fields=["remaining_seconds", "last_seen_at", "is_paused", "paused_at", "status"])
 
-    questions = list(exam.questions.filter(is_deleted=False).order_by("number"))
-    remaining = _calc_remaining_seconds(ue)
+    questions = list(
+        exam.questions.filter(is_deleted=False).order_by("number").values("id", "number", "description")
+    )
+
+    answers_map_int = parse_response_text(ue.response_text or "")
+    # template tag expects string keys
+    answers_map = {str(k): v for k, v in answers_map_int.items()}
 
     return render(request, f"{TEAM_NAME}/writing.html", {
         "user_exam": ue,
         "exam": exam,
         "pack": exam.pack,
         "questions": questions,
-        "remaining_seconds": remaining,
-        "answers": ue.answers or {},
+        "remaining_seconds": ue.remaining_seconds or exam.exam_time_seconds,
+        "answers_map": answers_map,
     })
 
 @api_login_required
@@ -632,7 +639,6 @@ def writing_resume(request, user_exam_id: int):
 
     return JsonResponse({"ok": True, "remaining_seconds": ue.remaining_seconds or ue.exam.exam_time_seconds})
 
-import json
 
 @api_login_required
 @csrf_exempt
@@ -644,21 +650,24 @@ def writing_autosave(request, user_exam_id: int):
         return JsonResponse({"ok": False, "error": "Already finished"}, status=400)
 
     payload = json.loads(request.body.decode("utf-8") or "{}")
-    answers = payload.get("answers", {})
+    incoming = payload.get("answers", {})  # {"1":"text","2":"text"} keys are question numbers
 
-    # merge (don’t wipe all if partial update)
-    current = ue.answers or {}
-    for k, v in answers.items():
-        current[str(k)] = v
+    existing = parse_response_text(ue.response_text or "")
 
-    # update remaining time if running
-    remaining = _calc_remaining_seconds(ue)
-    ue.remaining_seconds = remaining
+    # merge updates
+    for k, v in (incoming or {}).items():
+        k = str(k).strip()
+        if not k.isdigit():
+            continue
+        qn = int(k)
+        existing[qn] = (v or "").strip()
+
+    ue.response_text = build_response_text(existing)
+    ue.remaining_seconds = _calc_remaining_seconds(ue)
     ue.last_seen_at = timezone.now()
-    ue.answers = current
-    ue.save(update_fields=["answers", "remaining_seconds", "last_seen_at"])
+    ue.save(update_fields=["response_text", "remaining_seconds", "last_seen_at"])
 
-    return JsonResponse({"ok": True, "remaining_seconds": remaining})
+    return JsonResponse({"ok": True, "remaining_seconds": ue.remaining_seconds})
 
 @api_login_required
 @csrf_exempt
@@ -667,18 +676,13 @@ def writing_submit(request, user_exam_id: int):
     ue = get_object_or_404(UserExam, id=user_exam_id, user=request.user, is_deleted=False)
 
     if ue.status in FINISHED_STATUSES:
-        return JsonResponse({"ok": True})  # idempotent
+        return JsonResponse({"ok": True})
 
-    # final time calculation
-    remaining = _calc_remaining_seconds(ue)
-    ue.remaining_seconds = remaining
+    ue.remaining_seconds = _calc_remaining_seconds(ue)
     ue.last_seen_at = timezone.now()
     ue.is_paused = False
     ue.paused_at = None
     ue.status = UserExamStatus.SUBMITTED
-
-    # if you still want a single text field too:
-    # ue.response_text = "\n\n".join(...)
     ue.save(update_fields=["remaining_seconds", "last_seen_at", "is_paused", "paused_at", "status"])
 
     return JsonResponse({"ok": True})
@@ -701,3 +705,38 @@ def writing_exit(request, user_exam_id: int):
     ue.save(update_fields=["remaining_seconds", "is_paused", "status", "paused_at", "last_seen_at"])
 
     return JsonResponse({"ok": True, "redirect": "/"} )
+
+
+def parse_response_text(raw: str) -> Dict[int, str]:
+    raw = (raw or "").strip()
+    if not raw:
+        return {}
+
+    out: Dict[int, str] = {}
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+
+        m = _Q_LINE_RE.match(line)
+        if not m:
+            continue
+
+        qn = int(m.group(1))
+        ans = (m.group(2) or "").strip()
+        out[qn] = ans
+
+    return out
+
+
+def build_response_text(answer_map: Dict[int, str]) -> str:
+
+    if not answer_map:
+        return ""
+
+    lines = []
+    for qn in sorted(answer_map.keys()):
+        ans = (answer_map.get(qn) or "").strip()
+        lines.append(f"Q{qn}{KEY_SEP}{ans}")
+
+    return "\n".join(lines).strip()
