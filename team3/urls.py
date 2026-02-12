@@ -15,6 +15,7 @@ urlpatterns = [
     path("speaking/<int:user_exam_id>/submit/", views.speaking_submit, name="speaking_submit"),
     path("speaking/<int:user_exam_id>/exit/", views.speaking_exit, name="speaking_exit"),
 
+    path("writing/<int:exam_id>/", views.writing_exam, name="writing_exam"),
     path("writing/<int:user_exam_id>/pause/", views.writing_pause, name="writing_pause"),
     path("writing/<int:user_exam_id>/resume/", views.writing_resume, name="writing_resume"),
     path("writing/<int:user_exam_id>/autosave/", views.writing_autosave, name="writing_autosave"),
