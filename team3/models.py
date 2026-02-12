@@ -200,15 +200,9 @@ class UserExam(models.Model):
     response_voice_path = models.CharField(max_length=500, blank=True, null=True, verbose_name='Voice File Path')
     started_at = models.DateTimeField(null=True, blank=True)
     last_seen_at = models.DateTimeField(null=True, blank=True)
-
-    # timer state (server-side truth)
     remaining_seconds = models.PositiveIntegerField(null=True, blank=True)
-
     is_paused = models.BooleanField(default=False)
     paused_at = models.DateTimeField(null=True, blank=True)
-
-    # answers per question (simple + practical)
-    answers = models.JSONField(default=dict, blank=True)
     feedback = models.ForeignKey(
         Feedback,
         on_delete=models.SET_NULL,
@@ -218,10 +212,8 @@ class UserExam(models.Model):
         verbose_name='Feedback'
     )
 
-    # Soft delete support (MySQL-safe)
     is_deleted = models.BooleanField(default=False, db_index=True)
     deleted_at = models.DateTimeField(null=True, blank=True, verbose_name='Deleted At')
-
     created_at = models.DateTimeField(default=timezone.now, verbose_name='Created At')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='Updated At')
 
